@@ -197,26 +197,6 @@ ipcMain.handle('validate-path', async (_, path: string) => {
   }
 });
 
-// Helper function to recursively find all .inf files in a directory
-async function findInfFiles(dir: string): Promise<string[]> {
-    let files: string[] = [];
-    try {
-        const entries = await fs.readdir(dir, { withFileTypes: true });
-        for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-            if (entry.isDirectory()) {
-                files = files.concat(await findInfFiles(fullPath));
-            } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.inf')) {
-                files.push(fullPath);
-            }
-        }
-    } catch (error) {
-        console.error(`Error reading directory ${dir}:`, error);
-    }
-    return files;
-}
-
-
 // Scan backup folder for drivers
 ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ drivers: any[], errors: string[] }> => {
   const errors: string[] = [];
@@ -226,22 +206,25 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
   };
   
   try {
-    const infFiles = await findInfFiles(folderPath);
-    if (infFiles.length === 0) {
-      const msg = `Scan complete: No .inf files found in the directory: ${folderPath}`;
-      return { drivers: [], errors: [msg] };
-    }
-    
-    errors.push(`Found ${infFiles.length} .inf files to process.`);
+    // Sanitize the path for inclusion in a PowerShell string. Single quotes are escaped by doubling them.
+    const sanitizedFolderPath = folderPath.replace(/'/g, "''");
 
-    const sanitizedInfPaths = infFiles.map(f => `'${f.replace(/'/g, "''")}'`).join(',');
-    
-    // PowerShell script to parse INF files.
-    // It now attempts to auto-detect encoding and reports errors for individual files.
+    // PowerShell script now finds the files itself, avoiding the command-length limit.
     const command = `
-        $infPaths = @(${sanitizedInfPaths});
+        $rootPath = '${sanitizedFolderPath}';
+        try {
+            $infFiles = Get-ChildItem -Path $rootPath -Recurse -Filter *.inf -ErrorAction Stop;
+        } catch {
+            # This block catches errors from Get-ChildItem, like if the directory doesn't exist
+            Write-Output "[]"
+            # Use Write-Error to communicate the problem back to the stderr stream
+            Write-Error "Failed to read directory '$rootPath': $_.Exception.Message"
+            exit 1
+        }
+        
         $allDrivers = @();
-        foreach ($infPath in $infPaths) {
+        foreach ($infFile in $infFiles) {
+            $infPath = $infFile.FullName
             try {
                 # Attempt to read with auto-detection; this is more robust than forcing an encoding.
                 $infContent = Get-Content -Path $infPath -ErrorAction Stop -Raw;
@@ -316,18 +299,21 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
     return new Promise((resolve) => {
       exec(`powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encodedCommand}`, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
           if (error) {
-              logError(`PowerShell execution failed: ${error.message}. Stderr: ${stderr}`);
+              // Now, stderr might contain useful info from our script's Write-Error
+              const errorMsg = stderr ? `Stderr: ${stderr}` : `Error: ${error.message}`;
+              logError(`PowerShell execution failed. ${errorMsg}`);
               resolve({ drivers: [], errors });
               return;
           }
           if (stderr) {
-              // stderr is not always a fatal error, but worth logging for diagnostics.
+              // Log non-fatal stderr output for diagnostics
               logError(`PowerShell process wrote to stderr: ${stderr}`);
           }
 
           try {
-              if (!stdout.trim()) {
-                  logError('PowerShell command returned empty output. No drivers or errors were processed.');
+              if (!stdout.trim() || stdout.trim() === '[]') {
+                  // Handle case where no drivers are found or script returns empty array
+                  errors.push(`Scan complete: No .inf files found or processed in directory: ${folderPath}`);
                   resolve({ drivers: [], errors });
                   return;
               }

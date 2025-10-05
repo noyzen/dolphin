@@ -1,6 +1,15 @@
 // FIX: Import IpcRendererEvent type directly from electron to avoid namespace error.
 import { contextBridge, ipcRenderer, IpcRendererEvent, OpenDialogOptions } from 'electron';
 
+// Define a more specific type for the drivers found in a backup folder.
+export interface DriverFromBackup {
+  id: string;
+  displayName: string;
+  infName: string;
+  fullInfPath: string;
+}
+
+
 contextBridge.exposeInMainWorld('electronAPI', {
   // Window controls
   minimizeWindow: () => ipcRenderer.send('minimize-window'),
@@ -19,6 +28,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   runCommandAndGetOutput: (command: string): Promise<{ stdout: string; stderr:string; code: number | null; }> => ipcRenderer.invoke('run-command-and-get-output', command),
   checkSystemRestore: (): Promise<boolean> => ipcRenderer.invoke('check-system-restore'),
   getWindowsPath: (): Promise<string> => ipcRenderer.invoke('get-windows-path'),
+  
+  // Settings Persistence
+  getSetting: (key: string): Promise<any> => ipcRenderer.invoke('get-setting', key),
+  setSetting: (key: string, value: any) => ipcRenderer.send('set-setting', { key, value }),
+
+  // New selective restore helper
+  scanBackupFolder: (folderPath: string): Promise<DriverFromBackup[]> => ipcRenderer.invoke('scan-backup-folder', folderPath),
+
 
   // Command output listeners
   onCommandStart: (callback: (description: string) => void) => {

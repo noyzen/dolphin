@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { OpenDialogOptions } from 'electron';
+import type { DriverFromBackup } from '../electron/preload';
 
 declare module 'react' {
   interface CSSProperties {
@@ -44,6 +45,9 @@ declare global {
       runCommandAndGetOutput: (command: string) => Promise<{ stdout: string; stderr: string; code: number | null }>;
       checkSystemRestore: () => Promise<boolean>;
       getWindowsPath: () => Promise<string>;
+      getSetting: (key: string) => Promise<any>;
+      setSetting: (key: string, value: any) => void;
+      scanBackupFolder: (folderPath: string) => Promise<DriverFromBackup[]>;
       onCommandStart: (callback: (description: string) => void) => () => void;
       onCommandOutput: (callback: (output: string) => void) => () => void;
       onCommandEnd: (callback: (code: number | null) => void) => () => void;
@@ -178,6 +182,8 @@ const App: React.FC = () => {
   const [backupPath, setBackupPath] = useState('');
   const [restorePath, setRestorePath] = useState('');
   const [selectiveBackupPath, setSelectiveBackupPath] = useState('');
+  const [selectiveRestoreFolder, setSelectiveRestoreFolder] = useState('');
+
   
   // System state
   const [isSystemRestoreEnabled, setIsSystemRestoreEnabled] = useState<boolean | null>(null);
@@ -189,7 +195,9 @@ const App: React.FC = () => {
   const [windowsPath, setWindowsPath] = useState('');
   
   // Selective Restore
-  const [selectiveRestoreFiles, setSelectiveRestoreFiles] = useState<string[]>([]);
+  const [driversFromBackup, setDriversFromBackup] = useState<DriverFromBackup[]>([]);
+  const [selectedDriversFromBackup, setSelectedDriversFromBackup] = useState<Set<string>>(new Set());
+
   
   const notificationIdCounter = useRef(0);
 
@@ -207,14 +215,39 @@ const App: React.FC = () => {
     setLogs(prev => [...prev, { id: logIdCounter++, timestamp, type, message }]);
   };
 
+  const scanBackupFolder = useCallback(async (folder: string) => {
+      if (!folder) return;
+      setIsBusy(true);
+      setCurrentOperation(`در حال اسکن پوشه پشتیبان`);
+      addLog('START', `Scanning backup folder: ${folder}`);
+      const foundDrivers = await window.electronAPI.scanBackupFolder(folder);
+      setDriversFromBackup(foundDrivers);
+      setSelectedDriversFromBackup(new Set());
+      setIsBusy(false);
+      setCurrentOperation('');
+      addLog('END_SUCCESS', `Scan complete. Found ${foundDrivers.length} driver packages.`);
+      addNotification('info', 'اسکن کامل شد', `تعداد ${foundDrivers.length} درایور در پوشه یافت شد.`);
+  }, [addNotification]);
+
+
   useEffect(() => {
     window.electronAPI.checkAdmin().then(setIsAdmin);
-
     addLog('INFO', 'Application initialized.');
     const cleanupWindowState = window.electronAPI.onWindowStateChange(setIsMaximized);
     window.electronAPI.getWindowsPath().then(setWindowsPath);
     
-    // Automatic System Restore check on startup
+    const loadSettings = async () => {
+        setBackupPath(await window.electronAPI.getSetting('backupPath') || '');
+        setRestorePath(await window.electronAPI.getSetting('restorePath') || '');
+        setSelectiveBackupPath(await window.electronAPI.getSetting('selectiveBackupPath') || '');
+        const folder = await window.electronAPI.getSetting('selectiveRestoreFolder') || '';
+        if (folder) {
+            setSelectiveRestoreFolder(folder);
+            scanBackupFolder(folder);
+        }
+    };
+    loadSettings();
+    
     window.electronAPI.checkSystemRestore().then(status => {
       setIsSystemRestoreEnabled(status);
       if (!status) {
@@ -244,7 +277,7 @@ const App: React.FC = () => {
         
         if (currentOperation) {
             if (success) {
-                addNotification('success', 'عملیات موفق', `${currentOperation} با موفقیت به پایان رسید.`);
+                addNotification('success', 'عملیat موفق', `${currentOperation} با موفقیت به پایان رسید.`);
             } else {
                 addNotification('error', 'عملیات ناموفق', `${currentOperation} با خطا مواجه شد. به لاگ‌ها مراجعه کنید.`);
             }
@@ -258,9 +291,22 @@ const App: React.FC = () => {
       cleanupOutput();
       cleanupEnd();
     };
-  }, [currentOperation, addNotification]);
+  }, [currentOperation, addNotification, scanBackupFolder]);
   
-  const handleSelectFolder = async (setter: React.Dispatch<React.SetStateAction<string>>) => {
+  const createPathSetter = (stateSetter: React.Dispatch<React.SetStateAction<string>>, key: string) => {
+    return (path: string) => {
+      stateSetter(path);
+      window.electronAPI.setSetting(key, path);
+    }
+  };
+  
+  const setPersistedBackupPath = createPathSetter(setBackupPath, 'backupPath');
+  const setPersistedRestorePath = createPathSetter(setRestorePath, 'restorePath');
+  const setPersistedSelectiveBackupPath = createPathSetter(setSelectiveBackupPath, 'selectiveBackupPath');
+  const setPersistedSelectiveRestoreFolder = createPathSetter(setSelectiveRestoreFolder, 'selectiveRestoreFolder');
+
+
+  const handleSelectFolder = async (setter: (path: string) => void) => {
     const paths = await window.electronAPI.selectDialog({ properties: ['openDirectory', 'createDirectory'] });
     if (paths && paths.length > 0) {
       setter(paths[0]);
@@ -275,7 +321,7 @@ const App: React.FC = () => {
 
   const handleCreateRestorePoint = async () => {
     if (isBusy) return;
-    const command = `powershell.exe -Command "Checkpoint-Computer -Description 'DriverDolphin Pre-Restore Point' -RestorePointType 'MODIFY_SETTINGS'"`;
+    const command = `Checkpoint-Computer -Description 'DriverDolphin Pre-Restore Point' -RestorePointType 'MODIFY_SETTINGS'`;
     
     setIsBusy(true);
     setCurrentOperation("در حال ایجاد یک نقطه بازیابی سیستم جدید");
@@ -287,7 +333,6 @@ const App: React.FC = () => {
     if (stdout) addLog('OUTPUT', stdout);
     
     const warningMessage = "one has already been created within the past 1440 minutes";
-    // Check for specific warning first, even on success code
     if (stdout.includes(warningMessage) || stderr.includes(warningMessage)) {
         const uiMessage = "یک نقطه بازیابی به تازگی ایجاد شده است. ویندوز اجازه ایجاد نقطه جدید را نمی‌دهد.";
         addLog('WARN', "A new system restore point cannot be created because one was created within the last 24 hours.");
@@ -310,41 +355,10 @@ const App: React.FC = () => {
     const command = `pnputil /add-driver "${restorePath}\\*.inf" /subdirs /install`;
     window.electronAPI.runCommand(command, `در حال نصب تمام درایورها از "${restorePath}"`);
   };
-  
-  const parsePnpUtilOutput = (output: string): DriverInfo[] => {
-    const drivers: DriverInfo[] = [];
-    const blocks = output.split('Published Name :').slice(1);
-
-    for (const block of blocks) {
-        const driver: Partial<DriverInfo> = {};
-        const lines = block.trim().split(/\r?\n/);
-
-        driver.publishedName = lines[0]?.trim();
-        if (!driver.publishedName) continue;
-
-        for (let i = 1; i < lines.length; i++) {
-            const line = lines[i];
-            const separatorIndex = line.indexOf(':');
-            if (separatorIndex === -1) continue;
-
-            const key = line.substring(0, separatorIndex).trim();
-            const value = line.substring(separatorIndex + 1).trim();
-
-            if (key === 'Original Name') driver.originalName = value;
-            else if (key === 'Provider Name') driver.provider = value;
-            else if (key === 'Class Name') driver.className = value;
-        }
-
-        if (driver.publishedName && driver.originalName && driver.provider && driver.className) {
-            drivers.push(driver as DriverInfo);
-        }
-    }
-    return drivers;
-  };
 
   const handleScanDrivers = async () => {
     if (isBusy) return;
-    const command = `chcp 65001 && pnputil /enum-drivers`;
+    const command = `Get-WindowsDriver -Online | Where-Object { !$_.Inbox } | Select-Object @{n='publishedName';e={$_.Driver}}, @{n='originalName';e={$_.OriginalFileName}}, @{n='provider';e={$_.ProviderName}}, @{n='className';e={$_.ClassName}} | ConvertTo-Json -Compress`;
     setDrivers([]);
     setSelectedDrivers(new Set());
     
@@ -353,18 +367,29 @@ const App: React.FC = () => {
     addLog('START', "Scanning system for third-party drivers.");
 
     const { stdout, stderr, code } = await window.electronAPI.runCommandAndGetOutput(command);
+    
+    let success = code === 0;
 
     if (stderr) {
         addLog('OUTPUT', `ERROR: ${stderr}`);
     }
     
-    const parsedDrivers = parsePnpUtilOutput(stdout);
-    setDrivers(parsedDrivers);
-    if (parsedDrivers.length > 0) {
-      addLog('INFO', `${parsedDrivers.length} drivers found and processed.`);
+    let parsedDrivers: DriverInfo[] = [];
+    if (stdout) {
+        try {
+            parsedDrivers = stdout.trim().split('\n').map(line => JSON.parse(line));
+            setDrivers(parsedDrivers);
+            if (parsedDrivers.length > 0) {
+                addLog('INFO', `${parsedDrivers.length} drivers found and processed.`);
+            } else {
+                 addLog('INFO', `Scan complete, no third-party drivers found.`);
+            }
+        } catch (e) {
+            addLog('END_ERROR', 'Failed to parse driver scan output.');
+            success = false;
+        }
     }
-
-    const success = code === 0;
+    
     addLog(success ? 'END_SUCCESS' : 'END_ERROR', `Scan process finished with exit code ${code}.`);
     
     if (success) {
@@ -403,25 +428,40 @@ const App: React.FC = () => {
       const selectedDriverInfo = drivers.filter(d => selectedDrivers.has(d.publishedName));
       const fileRepoPath = `${windowsPath}\\System32\\DriverStore\\FileRepository`;
       const infNames = selectedDriverInfo.map(d => d.originalName.replace('.inf', ''));
-      const command = `powershell -Command "Get-ChildItem -Path '${fileRepoPath}' -Recurse -Directory | Where-Object { $name = $_.Name; ${infNames.map(n => `$name -like '${n}*'`).join(' -or ')} } | Copy-Item -Destination '${selectiveBackupPath}' -Recurse -Container -Force"`;
-      window.electronAPI.runCommand(command, `در حال پشتیبان‌گیری از ${selectedDrivers.size} درایور انتخاب شده`);
+      
+      const whereClauses = infNames.map(n => `($_.Name -like '${n}*')`).join(' -or ');
+      const command = `Get-ChildItem -Path '${fileRepoPath}' -Recurse -Directory | Where-Object { ${whereClauses} } | Copy-Item -Destination '${selectiveBackupPath}' -Recurse -Container -Force`;
+      
+      window.electronAPI.runCommand(`powershell -Command "${command}"`, `در حال پشتیبان‌گیری از ${selectedDrivers.size} درایور انتخاب شده`);
   };
   
-  const handleSelectRestoreFiles = async () => {
-      const paths = await window.electronAPI.selectDialog({ 
-          properties: ['openFile', 'multiSelections'],
-          filters: [{ name: 'Driver INF Files', extensions: ['inf'] }]
-      });
-      if (paths && paths.length > 0) {
-          setSelectiveRestoreFiles(paths);
+  const handleSelectiveRestore = () => {
+      if (selectedDriversFromBackup.size === 0 || isBusy) return;
+      const command = Array.from(selectedDriversFromBackup).map(path => `pnputil /add-driver "${path}" /install`).join(' & ');
+      window.electronAPI.runCommand(command, `در حال نصب ${selectedDriversFromBackup.size} درایور انتخاب شده`);
+  };
+  
+  const toggleBackupDriverSelection = (fullInfPath: string) => {
+    setSelectedDriversFromBackup(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(fullInfPath)) {
+            newSet.delete(fullInfPath);
+        } else {
+            newSet.add(fullInfPath);
+        }
+        return newSet;
+    });
+  };
+  
+  const handleToggleSelectAllBackupDrivers = () => {
+      if (selectedDriversFromBackup.size === driversFromBackup.length) {
+          setSelectedDriversFromBackup(new Set());
+      } else {
+          const allDriverPaths = driversFromBackup.map(d => d.fullInfPath);
+          setSelectedDriversFromBackup(new Set(allDriverPaths));
       }
   };
 
-  const handleSelectiveRestore = () => {
-      if (selectiveRestoreFiles.length === 0 || isBusy) return;
-      const command = `pnputil ${selectiveRestoreFiles.map(path => `/add-driver "${path}"`).join(' ')} /install`;
-      window.electronAPI.runCommand(command, `در حال نصب ${selectiveRestoreFiles.length} درایور انتخاب شده`);
-  };
 
   const tabs = [
     { id: 'full-backup', icon: 'fa-hdd', label: 'پشتیبان‌گیری کامل' },
@@ -461,7 +501,7 @@ const App: React.FC = () => {
             <p className="text-gray-400 mb-6">تمام درایورهای شخص ثالث (third-party) را در یک پوشه ذخیره کنید.</p>
             <div className="flex items-center space-x-reverse space-x-2 mb-6">
                 <input type="text" readOnly value={backupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
-                <button onClick={() => handleSelectFolder(setBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder-open"></i></button>
+                <button onClick={() => handleSelectFolder(setPersistedBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder-open"></i></button>
             </div>
             <div className="mt-auto flex justify-start">
               <button onClick={handleFullBackup} disabled={!backupPath || isBusy} className="btn-primary w-64">
@@ -487,7 +527,7 @@ const App: React.FC = () => {
 
             <div className="flex items-center space-x-reverse space-x-2 mb-6">
                 <input type="text" readOnly value={restorePath} placeholder="پوشه پشتیبان را انتخاب کنید..." className="form-input-custom" />
-                <button onClick={() => handleSelectFolder(setRestorePath)} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder"></i></button>
+                <button onClick={() => handleSelectFolder(setPersistedRestorePath)} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder"></i></button>
             </div>
             <div className="mt-auto flex justify-start">
               <button onClick={handleFullRestore} disabled={!restorePath || isBusy} className="btn-primary w-64">
@@ -529,7 +569,7 @@ const App: React.FC = () => {
             </div>
              <div className="flex items-center space-x-reverse space-x-2 mb-4">
                 <input type="text" readOnly value={selectiveBackupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
-                <button onClick={() => handleSelectFolder(setSelectiveBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder-open"></i></button>
+                <button onClick={() => handleSelectFolder(setPersistedSelectiveBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder-open"></i></button>
             </div>
             <div className="flex justify-start">
               <button onClick={handleSelectiveBackup} disabled={selectedDrivers.size === 0 || !selectiveBackupPath || isBusy} className="btn-primary w-64">
@@ -541,36 +581,50 @@ const App: React.FC = () => {
       case 'selective-restore':
          return (
           <div className="flex flex-col h-full">
-            <h2 className="text-2xl font-bold mb-4 text-gray-200">بازیابی انتخابی</h2>
-            <p className="text-gray-400 mb-6">فایل‌های .inf درایورهای مورد نظر برای نصب را انتخاب کنید.</p>
+            <h2 className="text-2xl font-bold mb-4 text-gray-200">بازیابی انتخابی از پوشه</h2>
+            <p className="text-gray-400 mb-2">یک پوشه پشتیبان را انتخاب کرده و درایورهای مورد نظر برای نصب را مشخص کنید.</p>
             
-            <div className="mb-6">
+            <div className="mb-4">
                <button onClick={handleCreateRestorePoint} disabled={isBusy || !isSystemRestoreEnabled} className="btn-info w-64">
                   <i className="fas fa-shield-alt mr-2"></i> ایجاد نقطه بازیابی
               </button>
             </div>
-
-            <div className="flex items-center space-x-reverse space-x-2 mb-6">
-                <div className="form-input-custom h-24 overflow-y-auto text-gray-400 text-sm p-2">
-                    {selectiveRestoreFiles.length > 0 ? (
-                        <ul className="space-y-1">
-                            {selectiveRestoreFiles.map((file, index) => (
-                                <li key={index} className="truncate text-xs font-mono" title={file}>
-                                    {file.split(/[\\/]/).pop()}
-                                </li>
-                            ))}
-                        </ul>
-                    ) : (
-                        <div className="flex items-center justify-center h-full">
-                            <span>فایل‌های .inf را انتخاب کنید...</span>
-                        </div>
-                    )}
-                </div>
-                <button onClick={handleSelectRestoreFiles} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-file-import"></i></button>
+            
+            <div className="flex items-center space-x-reverse space-x-2 mb-4">
+                <input type="text" readOnly value={selectiveRestoreFolder} placeholder="پوشه پشتیبان را انتخاب کنید..." className="form-input-custom" />
+                <button onClick={async () => {
+                    await handleSelectFolder((path) => {
+                        setPersistedSelectiveRestoreFolder(path);
+                        scanBackupFolder(path);
+                    });
+                }} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder"></i></button>
             </div>
+
+            <div className="flex items-center mb-2">
+                <input 
+                    type="checkbox" 
+                    id="select-all-backup-drivers"
+                    checked={driversFromBackup.length > 0 && selectedDriversFromBackup.size === driversFromBackup.length}
+                    onChange={handleToggleSelectAllBackupDrivers}
+                    disabled={driversFromBackup.length === 0 || isBusy}
+                />
+                <label htmlFor="select-all-backup-drivers" className="pr-2 text-sm text-gray-300 cursor-pointer">انتخاب / عدم انتخاب همه</label>
+            </div>
+            <div className="flex-grow overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md mb-4 p-2">
+                {driversFromBackup.length === 0 && <p className="text-gray-500 text-center p-4">یک پوشه پشتیبان را برای اسکن انتخاب کنید.</p>}
+                {driversFromBackup.map(driver => (
+                    <div key={driver.id} className="flex items-center p-2 rounded hover:bg-white/5 transition-colors">
+                        <input type="checkbox" id={driver.id} checked={selectedDriversFromBackup.has(driver.fullInfPath)} onChange={() => toggleBackupDriverSelection(driver.fullInfPath)} />
+                        <label htmlFor={driver.id} className="flex-grow cursor-pointer text-sm pr-3 font-mono">
+                            <span className="font-bold text-gray-200">{driver.displayName}</span>
+                        </label>
+                    </div>
+                ))}
+            </div>
+
             <div className="mt-auto flex justify-start">
-              <button onClick={handleSelectiveRestore} disabled={selectiveRestoreFiles.length === 0 || isBusy} className="btn-primary w-64">
-                  <i className="fas fa-play mr-2"></i> شروع بازیابی انتخابی
+              <button onClick={handleSelectiveRestore} disabled={selectedDriversFromBackup.size === 0 || isBusy} className="btn-primary w-64">
+                  <i className="fas fa-play mr-2"></i> نصب {selectedDriversFromBackup.size} درایور
               </button>
             </div>
           </div>
@@ -584,12 +638,12 @@ const App: React.FC = () => {
                 <button onClick={() => navigator.clipboard.writeText(logs.map(l => `[${l.timestamp}] [${l.type}] ${l.message}`).join('\n'))} className="btn-secondary" aria-label="Copy Logs"><i className="fas fa-copy"></i></button>
                 <button onClick={() => setLogs([])} className="btn-secondary" aria-label="Clear Logs"><i className="fas fa-trash"></i></button>
             </div>
-            <div ref={logContainerRef} className="flex-grow bg-gray-900/80 rounded-lg ring-1 ring-white/10 p-4 font-mono text-xs overflow-y-auto whitespace-pre-wrap dir-ltr text-left">
+            <div ref={logContainerRef} className="flex-grow bg-gray-900/80 rounded-lg ring-1 ring-white/10 p-4 font-mono text-xs overflow-y-auto whitespace-pre-wrap dir-rtl text-right">
                 {filteredLogs.map(log => (
-                    <div key={log.id} className="flex">
-                        <span className="text-gray-500 mr-4">{log.timestamp}</span>
-                        <span className={`w-24 font-bold ${logTypeStyles[log.type]}`}>{`[${log.type}]`}</span>
-                        <span className={`flex-1 ${logTypeStyles[log.type]}`}>{log.message}</span>
+                    <div key={log.id} className="flex items-baseline">
+                        <span className="text-gray-500 ml-4">{log.timestamp}</span>
+                        <span className={`w-24 flex-shrink-0 font-bold ${logTypeStyles[log.type]}`}>{`[${log.type}]`}</span>
+                        <span className={`flex-grow ${logTypeStyles[log.type]}`}>{log.message}</span>
                     </div>
                 ))}
             </div>

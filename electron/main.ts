@@ -3,17 +3,27 @@ import path from 'path';
 import Store from 'electron-store';
 import { exec } from 'child_process';
 import os from 'os';
+import fs from 'fs/promises';
+
 
 // Define the shape of the stored data.
 interface AppStore {
   windowBounds: { width: number; height: number; x?: number; y?: number };
   isMaximized?: boolean;
+  backupPath?: string;
+  restorePath?: string;
+  selectiveBackupPath?: string;
+  selectiveRestoreFolder?: string;
 }
 
 const store = new Store<AppStore>({
   defaults: {
     windowBounds: { width: 1024, height: 768 },
     isMaximized: false,
+    backupPath: '',
+    restorePath: '',
+    selectiveBackupPath: '',
+    selectiveRestoreFolder: '',
   },
 });
 
@@ -147,7 +157,7 @@ ipcMain.on('run-command', (event, command: string, description: string) => {
 ipcMain.handle('run-command-and-get-output', async (event, command: string) => {
   return new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
     // Using a larger buffer for potentially large driver lists
-    exec(command, { encoding: 'utf8', maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+    exec(command, { shell: 'powershell.exe', encoding: 'utf8', maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
       resolve({
         stdout,
         stderr,
@@ -167,6 +177,45 @@ ipcMain.handle('check-system-restore', async () => {
 });
 
 ipcMain.handle('get-windows-path', () => os.homedir().split(path.sep)[0] + path.sep + 'Windows');
+
+// Settings Persistence
+ipcMain.handle('get-setting', async (_, key: keyof AppStore) => {
+  return store.get(key);
+});
+
+ipcMain.on('set-setting', (_, { key, value }: { key: keyof AppStore, value: any }) => {
+  store.set(key, value);
+});
+
+// Scan backup folder for drivers
+ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
+  try {
+    const entries = await fs.readdir(folderPath, { withFileTypes: true });
+    const driverDirs = entries.filter(entry => entry.isDirectory());
+    const drivers = [];
+    for (const dir of driverDirs) {
+      try {
+        const driverPath = path.join(folderPath, dir.name);
+        const files = await fs.readdir(driverPath);
+        const infFile = files.find(f => f.toLowerCase().endsWith('.inf'));
+        if (infFile) {
+          drivers.push({
+            id: dir.name,
+            displayName: dir.name.split('.')[0] || dir.name, // try to get a cleaner name
+            infName: infFile,
+            fullInfPath: path.join(driverPath, infFile)
+          });
+        }
+      } catch (e) {
+        console.warn(`Could not process directory ${dir.name}:`, e);
+      }
+    }
+    return drivers;
+  } catch (error) {
+    console.error('Failed to scan backup folder:', error);
+    return []; // Return empty array on error
+  }
+});
 
 
 app.on('ready', () => {

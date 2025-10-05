@@ -626,8 +626,8 @@ const App: React.FC = () => {
                   </button>
                 </div>
                 <div className="relative mb-2">
-                    <i className="fas fa-search absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"></i>
-                    <input type="text" value={selectiveBackupSearch} onChange={e => setSelectiveBackupSearch(e.target.value)} placeholder="جستجوی درایور..." className="form-input-custom pr-10" />
+                    <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"></i>
+                    <input type="text" value={selectiveBackupSearch} onChange={e => setSelectiveBackupSearch(e.target.value)} placeholder="جستجوی درایور..." className="form-input-custom pl-10" />
                 </div>
                  <div className="flex items-center mb-2 text-sm text-gray-300">
                     <input 
@@ -688,8 +688,8 @@ const App: React.FC = () => {
                     }} disabled={isBusy} className="btn-secondary flex-shrink-0" title="انتخاب و اسکن پوشه"><i className="fas fa-folder-search"></i></button>
                 </div>
                 <div className="relative mb-2">
-                    <i className="fas fa-search absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"></i>
-                    <input type="text" value={selectiveRestoreSearch} onChange={e => setSelectiveRestoreSearch(e.target.value)} placeholder="جستجوی درایور در پشتیبان..." className="form-input-custom pr-10" />
+                    <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"></i>
+                    <input type="text" value={selectiveRestoreSearch} onChange={e => setSelectiveRestoreSearch(e.target.value)} placeholder="جستجوی درایور در پشتیبان..." className="form-input-custom pl-10" />
                 </div>
                 <div className="flex items-center mb-2 text-sm text-gray-300">
                     <input 

@@ -94,7 +94,7 @@ const NotificationUI: React.FC<{ notification: Notification; onDismiss: (id: num
 
   return (
     <div
-      className={`relative w-80 max-w-sm rounded-lg shadow-lg backdrop-blur-md ring-1 ring-white/10 overflow-hidden border-l-4 transition-all duration-300 ease-in-out transform ${style.base} ${show ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-full'}`}
+      className={`relative w-80 max-w-sm rounded-lg shadow-lg backdrop-blur-md ring-1 ring-white/10 overflow-hidden border-r-4 transition-all duration-300 ease-in-out transform ${style.base} ${show ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-full'}`}
       role="alert"
     >
       <div className="p-4 flex items-start gap-4">
@@ -105,7 +105,7 @@ const NotificationUI: React.FC<{ notification: Notification; onDismiss: (id: num
         </div>
         <button
           onClick={handleDismiss}
-          className="absolute top-2 right-2 text-gray-400 hover:text-white transition-colors"
+          className="absolute top-2 left-2 text-gray-400 hover:text-white transition-colors"
           aria-label="بستن"
         >
           <i className="fas fa-times"></i>
@@ -117,7 +117,7 @@ const NotificationUI: React.FC<{ notification: Notification; onDismiss: (id: num
 
 const NotificationContainer: React.FC<{ notifications: Notification[]; onDismiss: (id: number) => void; }> = ({ notifications, onDismiss }) => {
   return (
-    <div className="fixed top-10 right-4 z-[100] space-y-3" style={{ WebkitAppRegion: 'no-drag' }}>
+    <div className="fixed top-10 left-4 z-[100] space-y-3" style={{ WebkitAppRegion: 'no-drag' }}>
       {notifications.map(notification => (
         <NotificationUI key={notification.id} notification={notification} onDismiss={onDismiss} />
       ))}

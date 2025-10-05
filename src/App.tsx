@@ -210,7 +210,7 @@ const App: React.FC = () => {
   useEffect(() => {
     window.electronAPI.checkAdmin().then(setIsAdmin);
 
-    addLog('INFO', 'برنامه راه‌اندازی شد.');
+    addLog('INFO', 'Application initialized.');
     const cleanupWindowState = window.electronAPI.onWindowStateChange(setIsMaximized);
     window.electronAPI.getWindowsPath().then(setWindowsPath);
     
@@ -218,16 +218,16 @@ const App: React.FC = () => {
     window.electronAPI.checkSystemRestore().then(status => {
       setIsSystemRestoreEnabled(status);
       if (!status) {
-        addLog('WARN', 'System Restore غیرفعال است. ایجاد نقطه بازیابی با خطا مواجه خواهد شد.');
+        addLog('WARN', 'System Restore is disabled. Creating a restore point will fail.');
       } else {
-        addLog('INFO', 'System Restore فعال است.');
+        addLog('INFO', 'System Restore is enabled.');
       }
     });
     
     const cleanupStart = window.electronAPI.onCommandStart((description) => {
         setIsBusy(true);
         setCurrentOperation(description);
-        addLog('START', description);
+        addLog('START', `Operation started: ${description}`);
     });
 
     const cleanupOutput = window.electronAPI.onCommandOutput((output) => {
@@ -239,7 +239,7 @@ const App: React.FC = () => {
 
     const cleanupEnd = window.electronAPI.onCommandEnd((code) => {
         const success = code === 0;
-        addLog(success ? 'END_SUCCESS' : 'END_ERROR', `فرآیند با کد خروجی ${code} پایان یافت.`);
+        addLog(success ? 'END_SUCCESS' : 'END_ERROR', `Operation finished with exit code ${code}.`);
         setIsBusy(false);
         
         if (currentOperation) {
@@ -279,25 +279,25 @@ const App: React.FC = () => {
     
     setIsBusy(true);
     setCurrentOperation("در حال ایجاد یک نقطه بازیابی سیستم جدید");
-    addLog('START', "شروع ایجاد نقطه بازیابی سیستم");
+    addLog('START', "Attempting to create a system restore point.");
 
     const { stdout, stderr, code } = await window.electronAPI.runCommandAndGetOutput(command);
 
     if (stderr) addLog('OUTPUT', `ERROR: ${stderr}`);
     if (stdout) addLog('OUTPUT', stdout);
     
-    const success = code === 0;
-    
     const warningMessage = "one has already been created within the past 1440 minutes";
-    if (success && (stdout.includes(warningMessage) || stderr.includes(warningMessage))) {
-        const message = "یک نقطه بازیابی به تازگی ایجاد شده است. ویندوز اجازه ایجاد نقطه جدید را نمی‌دهد.";
-        addLog('WARN', message);
-        addNotification('warning', 'نقطه بازیابی', message);
-    } else if (success) {
-       addLog('END_SUCCESS', `فرآیند نقطه بازیابی با کد خروجی ${code} پایان یافت.`);
+    // Check for specific warning first, even on success code
+    if (stdout.includes(warningMessage) || stderr.includes(warningMessage)) {
+        const uiMessage = "یک نقطه بازیابی به تازگی ایجاد شده است. ویندوز اجازه ایجاد نقطه جدید را نمی‌دهد.";
+        addLog('WARN', "A new system restore point cannot be created because one was created within the last 24 hours.");
+        addNotification('warning', 'نقطه بازیابی', uiMessage);
+        addLog('END_SUCCESS', `Process finished with exit code ${code} (with warning).`);
+    } else if (code === 0) {
+       addLog('END_SUCCESS', `Process finished with exit code ${code}.`);
        addNotification('success', 'موفقیت', 'نقطه بازیابی سیستم با موفقیت ایجاد شد.');
     } else {
-       addLog('END_ERROR', `فرآیند نقطه بازیابی با کد خروجی ${code} پایان یافت.`);
+       addLog('END_ERROR', `Process finished with exit code ${code}.`);
        addNotification('error', 'خطا', 'ایجاد نقطه بازیابی با خطا مواجه شد. به لاگ‌ها مراجعه کنید.');
     }
 
@@ -350,7 +350,7 @@ const App: React.FC = () => {
     
     setIsBusy(true);
     setCurrentOperation("در حال اسکن برای یافتن تمام درایورهای شخص ثالث");
-    addLog('START', "شروع اسکن درایورهای سیستم");
+    addLog('START', "Scanning system for third-party drivers.");
 
     const { stdout, stderr, code } = await window.electronAPI.runCommandAndGetOutput(command);
 
@@ -361,11 +361,11 @@ const App: React.FC = () => {
     const parsedDrivers = parsePnpUtilOutput(stdout);
     setDrivers(parsedDrivers);
     if (parsedDrivers.length > 0) {
-      addLog('INFO', `تعداد ${parsedDrivers.length} درایور پیدا و پردازش شد.`);
+      addLog('INFO', `${parsedDrivers.length} drivers found and processed.`);
     }
 
     const success = code === 0;
-    addLog(success ? 'END_SUCCESS' : 'END_ERROR', `فرآیند اسکن با کد خروجی ${code} پایان یافت.`);
+    addLog(success ? 'END_SUCCESS' : 'END_ERROR', `Scan process finished with exit code ${code}.`);
     
     if (success) {
       addNotification('success', 'اسکن کامل شد', `تعداد ${parsedDrivers.length} درایور شخص ثالث یافت شد.`);
@@ -584,7 +584,7 @@ const App: React.FC = () => {
                 <button onClick={() => navigator.clipboard.writeText(logs.map(l => `[${l.timestamp}] [${l.type}] ${l.message}`).join('\n'))} className="btn-secondary" aria-label="Copy Logs"><i className="fas fa-copy"></i></button>
                 <button onClick={() => setLogs([])} className="btn-secondary" aria-label="Clear Logs"><i className="fas fa-trash"></i></button>
             </div>
-            <div ref={logContainerRef} className="flex-grow bg-gray-900/80 rounded-lg ring-1 ring-white/10 p-4 font-mono text-xs overflow-y-auto whitespace-pre-wrap">
+            <div ref={logContainerRef} className="flex-grow bg-gray-900/80 rounded-lg ring-1 ring-white/10 p-4 font-mono text-xs overflow-y-auto whitespace-pre-wrap dir-ltr text-left">
                 {filteredLogs.map(log => (
                     <div key={log.id} className="flex">
                         <span className="text-gray-500 mr-4">{log.timestamp}</span>
@@ -619,24 +619,22 @@ const App: React.FC = () => {
   );
 
   const renderAppContent = () => (
-     <div className="flex flex-row-reverse h-full">
-        <aside className="w-60 flex-shrink-0 bg-gray-900/50 backdrop-blur-sm ring-1 ring-white/10 flex flex-col p-4">
-            <div className="space-y-2">
-                 {tabs.map(tab => (
-                       <button
-                          key={tab.id}
-                          onClick={() => setActiveTab(tab.id)}
-                          disabled={isBusy}
-                          className={`w-full flex items-center space-x-reverse space-x-3 p-3 rounded-md text-right text-sm font-medium transition-colors duration-200 disabled:opacity-50 group ${activeTab === tab.id ? 'bg-green-500/20 text-white shadow-inner shadow-black/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}
-                      >
-                          <i className={`fas ${tab.icon} w-6 text-center text-lg transition-colors ${activeTab === tab.id ? 'text-green-300' : 'text-gray-500 group-hover:text-gray-300'}`}></i>
-                          <span>{tab.label}</span>
-                      </button>
-                  ))}
-            </div>
-        </aside>
+     <div className="flex flex-col h-full">
+        <nav className="flex-shrink-0 flex items-center space-x-reverse space-x-1 border-b border-white/10 px-4 bg-gray-900/50 backdrop-blur-sm">
+             {tabs.map(tab => (
+                   <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id)}
+                      disabled={isBusy}
+                      className={`flex items-center space-x-reverse space-x-2 p-3 text-sm font-medium transition-colors duration-200 disabled:opacity-50 border-b-2 ${activeTab === tab.id ? 'border-green-400 text-white' : 'border-transparent text-gray-400 hover:bg-white/5 hover:text-white'}`}
+                  >
+                      <i className={`fas ${tab.icon} w-5 text-center ${activeTab === tab.id ? 'text-green-300' : 'text-gray-500'}`}></i>
+                      <span>{tab.label}</span>
+                  </button>
+              ))}
+        </nav>
 
-        <main className="flex-grow p-6 relative">
+        <main className="flex-grow p-6 relative overflow-y-auto">
            {isBusy && <BusyIndicator operation={currentOperation} />}
            {isSystemRestoreEnabled === false && showRestoreWarningBanner && (
               <div className="bg-yellow-900/50 text-yellow-200 p-3 mb-4 rounded-md text-sm ring-1 ring-yellow-500/50 flex items-center justify-between gap-3">

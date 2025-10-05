@@ -235,7 +235,7 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
         $allDrivers = @();
         foreach ($infPath in $infPaths) {
             try {
-                $infContent = Get-Content -Path $infPath -Encoding Default -ErrorAction Stop -Raw;
+                $infContent = Get-Content -Path $infPath -Encoding Unicode -ErrorAction Stop -Raw;
                 $strings = @{};
                 
                 if ($infContent -match '(?msi)\\[Strings\\]\\s*\\r?\\n(.*?)(?:\\r?\\n\\[|$)') {

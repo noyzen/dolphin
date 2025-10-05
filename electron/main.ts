@@ -225,22 +225,63 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
     
     // Sanitize paths for PowerShell and create a comma-separated list of strings
     const sanitizedInfPaths = infFiles.map(f => `'${f.replace(/'/g, "''")}'`).join(',');
+    
+    // This PowerShell script manually parses INF files to get driver info,
+    // as the `Get-WindowsDriver` cmdlet does not support reading from individual INF files.
     const command = `
         $infPaths = @(${sanitizedInfPaths});
         $allDrivers = @();
-        foreach ($path in $infPaths) {
+        foreach ($infPath in $infPaths) {
             try {
-                $drivers = Get-WindowsDriver -Path $path;
-                foreach ($driver in $drivers) {
-                    $props = @{
-                        provider = $driver.ProviderName;
-                        className = $driver.ClassName;
-                        version = $driver.DriverVersion;
-                        originalName = $driver.OriginalFileName;
-                        fullInfPath = $path;
-                    }
-                    $allDrivers += New-Object psobject -Property $props
+                $infContent = Get-Content -Path $infPath -ErrorAction Stop -Raw;
+                $strings = @{};
+                
+                if ($infContent -match '(?msi)\\[Strings\\]\\s*\\r?\\n(.*?)(?:\\r?\\n\\[|$)') {
+                    $stringSection = $Matches[1];
+                    $stringSection.Split([System.Environment]::NewLine) | ForEach-Object {
+                        if ($_ -match '^\\s*([^;=\\s]+)\\s*=\\s*"?([^"]*)"?\\s*$') {
+                            $strings[$Matches[1].Trim()] = $Matches[2].Trim();
+                        }
+                    };
                 }
+                
+                if ($infContent -match '(?msi)\\[Version\\]\\s*\\r?\\n(.*?)(?:\\r?\\n\\[|$)') {
+                    $versionSection = $Matches[1];
+                    $props = @{
+                        provider = '';
+                        className = '';
+                        version = '';
+                        originalName = (Split-Path $infPath -Leaf);
+                        fullInfPath = $infPath;
+                    };
+
+                    $versionSection.Split([System.Environment]::NewLine) | ForEach-Object {
+                        if ($_ -match '^\\s*Provider\\s*=\\s*(.*)$') {
+                            $val = $Matches[1].Trim().Trim('"');
+                            if ($val.StartsWith('%') -and $val.EndsWith('%')) {
+                                $key = $val.Substring(1, $val.Length - 2);
+                                if ($strings.ContainsKey($key)) {
+                                    $props.provider = $strings[$key];
+                                } else {
+                                    $props.provider = $key;
+                                }
+                            } else {
+                                $props.provider = $val;
+                            }
+                        }
+                        elseif ($_ -match '^\\s*Class\\s*=\\s*(.*)$') {
+                            $props.className = $Matches[1].Trim().Trim('"');
+                        }
+                        elseif ($_ -match '^\\s*DriverVer\\s*=\\s*.*?\\,\\s*([\\d\\.]+)$') {
+                            $props.version = $Matches[1].Trim();
+                        }
+                    };
+
+                    if ($props.provider -and $props.version) {
+                         $allDrivers += New-Object psobject -Property $props;
+                    }
+                }
+
             } catch {
                 # Silently ignore .inf files that cannot be processed
             }

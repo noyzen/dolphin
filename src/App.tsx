@@ -58,7 +58,7 @@ declare global {
       getSetting: (key: string) => Promise<any>;
       setSetting: (key: string, value: any) => void;
       validatePath: (path: string) => Promise<boolean>;
-      scanBackupFolder: (folderPath: string) => Promise<DriverFromBackup[]>;
+      scanBackupFolder: (folderPath: string) => Promise<{ drivers: DriverFromBackup[], errors: string[] }>;
       isFolderEmpty: (folderPath: string) => Promise<boolean>;
       showConfirmationDialog: (options: any) => Promise<number>;
       onCommandStart: (callback: (description: string) => void) => () => void;
@@ -263,15 +263,29 @@ const App: React.FC = () => {
       setIsBusy(true);
       setCurrentOperation(`در حال اسکن پوشه پشتیبان`);
       addLog('START', `Scanning backup folder: ${folder}`);
-      const foundDrivers = await window.electronAPI.scanBackupFolder(folder);
+      
+      const { drivers: foundDrivers, errors } = await window.electronAPI.scanBackupFolder(folder);
+      
+      if (errors && errors.length > 0) {
+          errors.forEach(err => addLog('INFO', `Scan Log: ${err}`));
+      }
+
       setDriversFromBackup(foundDrivers);
       setSelectedDriversFromBackup(new Set());
       setIsBusy(false);
       setCurrentOperation('');
+      
       addLog('END_SUCCESS', `Scan complete. Found ${foundDrivers.length} driver packages.`);
+      
+      const hasRealErrors = errors && errors.some(e => !e.startsWith('Found ') && !e.startsWith('Scan complete: No .inf'));
+
+      if (hasRealErrors) {
+          addNotification('error', 'خطا در اسکن', 'برخی از فایل‌های درایور قابل پردازش نبودند. به لاگ‌ها مراجعه کنید.');
+      }
+
       if (foundDrivers.length > 0) {
         addNotification('info', 'اسکن کامل شد', `تعداد ${foundDrivers.length} درایور در پوشه یافت شد.`);
-      } else {
+      } else if (!hasRealErrors) {
         addNotification('warning', 'اسکن کامل شد', `هیچ درایوری در پوشه انتخاب شده یافت نشد.`);
       }
   }, [addLog, addNotification]);
@@ -497,11 +511,19 @@ const App: React.FC = () => {
     setCurrentOperation(`در حال اسکن پوشه پشتیبان: ${restorePath}`);
     addLog('START', `Scanning backup folder for full restore: ${restorePath}`);
     
-    const driversInBackup = await window.electronAPI.scanBackupFolder(restorePath);
+    const { drivers: driversInBackup, errors } = await window.electronAPI.scanBackupFolder(restorePath);
     
+    if (errors && errors.length > 0) {
+        errors.forEach(err => addLog('INFO', `Scan Log: ${err}`));
+    }
+
     if (driversInBackup.length === 0) {
         addLog('END_ERROR', 'No drivers found in the specified folder.');
-        addNotification('warning', 'درایوری یافت نشد', 'پوشه انتخاب شده حاوی پکیج درایور معتبری نیست.');
+        if (!errors || errors.every(e => e.includes('No .inf files found'))) {
+          addNotification('warning', 'درایوری یافت نشد', 'پوشه انتخاب شده حاوی پکیج درایور معتبری نیست.');
+        } else {
+          addNotification('error', 'خطا در اسکن', 'اسکن پوشه پشتیبان ناموفق بود. به لاگ‌ها مراجعه کنید.');
+        }
         setIsBusy(false);
         setCurrentOperation('');
         return;

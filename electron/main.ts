@@ -218,24 +218,33 @@ async function findInfFiles(dir: string): Promise<string[]> {
 
 
 // Scan backup folder for drivers
-ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
+ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ drivers: any[], errors: string[] }> => {
+  const errors: string[] = [];
+  const logError = (msg: string) => {
+      console.error(msg); // Keep console logging for dev
+      errors.push(msg);
+  };
+  
   try {
     const infFiles = await findInfFiles(folderPath);
     if (infFiles.length === 0) {
-      console.log(`Scan complete: No .inf files found in ${folderPath}`);
-      return [];
+      const msg = `Scan complete: No .inf files found in the directory: ${folderPath}`;
+      return { drivers: [], errors: [msg] };
     }
     
-    // Sanitize paths for PowerShell and create a comma-separated list of strings
+    errors.push(`Found ${infFiles.length} .inf files to process.`);
+
     const sanitizedInfPaths = infFiles.map(f => `'${f.replace(/'/g, "''")}'`).join(',');
     
-    // This PowerShell script manually parses INF files to get driver info.
+    // PowerShell script to parse INF files.
+    // It now attempts to auto-detect encoding and reports errors for individual files.
     const command = `
         $infPaths = @(${sanitizedInfPaths});
         $allDrivers = @();
         foreach ($infPath in $infPaths) {
             try {
-                $infContent = Get-Content -Path $infPath -Encoding Unicode -ErrorAction Stop -Raw;
+                # Attempt to read with auto-detection; this is more robust than forcing an encoding.
+                $infContent = Get-Content -Path $infPath -ErrorAction Stop -Raw;
                 $strings = @{};
                 
                 if ($infContent -match '(?msi)\\[Strings\\]\\s*\\r?\\n(.*?)(?:\\r?\\n\\[|$)') {
@@ -289,7 +298,13 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
                 }
 
             } catch {
-                # Silently ignore .inf files that cannot be processed to prevent one bad file from failing the whole scan.
+                # Report errors as a special object instead of silently failing.
+                $errorRecord = @{
+                    isError = $true;
+                    infPath = $infPath;
+                    message = $_.Exception.Message;
+                }
+                $allDrivers += New-Object psobject -Property $errorRecord;
             }
         }
         $allDrivers | ConvertTo-Json -Compress
@@ -301,35 +316,51 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
     return new Promise((resolve) => {
       exec(`powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encodedCommand}`, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
           if (error) {
-              console.error('Error scanning backup folder with PowerShell:', stderr);
-              resolve([]);
+              logError(`PowerShell execution failed: ${error.message}. Stderr: ${stderr}`);
+              resolve({ drivers: [], errors });
               return;
           }
+          if (stderr) {
+              // stderr is not always a fatal error, but worth logging for diagnostics.
+              logError(`PowerShell process wrote to stderr: ${stderr}`);
+          }
+
           try {
               if (!stdout.trim()) {
-                  resolve([]);
+                  logError('PowerShell command returned empty output. No drivers or errors were processed.');
+                  resolve({ drivers: [], errors });
                   return;
               }
-              const drivers = JSON.parse(stdout);
-              const driverArray = Array.isArray(drivers) ? drivers : (drivers ? [drivers] : []);
+              const results = JSON.parse(stdout);
+              const resultsArray = Array.isArray(results) ? results : (results ? [results] : []);
               
-              const result = driverArray.map((d, index) => ({
+              const successfulDrivers: any[] = [];
+              resultsArray.forEach(item => {
+                if (item.isError) {
+                  logError(`Failed to parse INF '${path.basename(item.infPath)}': ${item.message.split('\n')[0]}`);
+                } else {
+                  successfulDrivers.push(item);
+                }
+              });
+              
+              const formattedDrivers = successfulDrivers.map((d, index) => ({
                   ...d,
                   id: `${d.fullInfPath}-${d.originalName}-${index}`,
                   displayName: `${d.provider || 'Unknown'} - ${d.className || d.originalName}`,
                   infName: d.originalName,
               }));
-              resolve(result);
-          } catch (e) {
-              console.error('Error parsing driver info JSON from backup scan:', e, 'Raw Output:', stdout);
-              resolve([]);
+
+              resolve({ drivers: formattedDrivers, errors });
+          } catch (e: any) {
+              logError(`Error parsing driver info JSON from PowerShell. Raw Output: ${stdout}. Error: ${e.message}`);
+              resolve({ drivers: [], errors });
           }
       });
     });
 
-  } catch (error) {
-    console.error('Failed to scan backup folder:', error);
-    return [];
+  } catch (error: any) {
+    logError(`An unexpected error occurred in scan-backup-folder: ${error.message}`);
+    return { drivers: [], errors };
   }
 });
 

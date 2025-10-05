@@ -26,7 +26,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   validatePath: (path: string): Promise<boolean> => ipcRenderer.invoke('validate-path', path),
 
   // Selective restore and backup helpers
-  scanBackupFolder: (folderPath: string): Promise<any[]> => ipcRenderer.invoke('scan-backup-folder', folderPath),
+  scanBackupFolder: (folderPath: string): Promise<{ drivers: any[], errors: string[] }> => ipcRenderer.invoke('scan-backup-folder', folderPath),
   isFolderEmpty: (folderPath: string): Promise<boolean> => ipcRenderer.invoke('is-folder-empty', folderPath),
   showConfirmationDialog: (options: any): Promise<number> => ipcRenderer.invoke('show-confirmation-dialog', options),
 

@@ -229,21 +229,24 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
     // Sanitize paths for PowerShell and create a comma-separated list of strings
     const sanitizedInfPaths = infFiles.map(f => `'${f.replace(/'/g, "''")}'`).join(',');
     
-    // This PowerShell script manually parses INF files to get driver info,
-    // as the `Get-WindowsDriver` cmdlet does not support reading from individual INF files.
+    // This PowerShell script manually parses INF files to get driver info.
     const command = `
         $infPaths = @(${sanitizedInfPaths});
         $allDrivers = @();
         foreach ($infPath in $infPaths) {
             try {
-                $infContent = Get-Content -Path $infPath -ErrorAction Stop -Raw;
+                $infContent = Get-Content -Path $infPath -Encoding Default -ErrorAction Stop -Raw;
                 $strings = @{};
                 
                 if ($infContent -match '(?msi)\\[Strings\\]\\s*\\r?\\n(.*?)(?:\\r?\\n\\[|$)') {
                     $stringSection = $Matches[1];
                     $stringSection.Split([System.Environment]::NewLine) | ForEach-Object {
-                        if ($_ -match '^\\s*([^;=\\s]+)\\s*=\\s*"?([^"]*)"?\\s*$') {
-                            $strings[$Matches[1].Trim()] = $Matches[2].Trim();
+                        if ($_ -match '^\\s*([^;=\\s]+)\\s*=\\s*(.*)$') {
+                            $key = $Matches[1].Trim()
+                            $value = $Matches[2].Trim().Trim('"')
+                            if ($key) {
+                                $strings[$key] = $value
+                            }
                         }
                     };
                 }
@@ -293,11 +296,9 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
     `;
 
     // Encode the command to prevent shell interpretation issues with quotes and newlines.
-    // This is the most reliable way to execute complex scripts.
     const encodedCommand = Buffer.from(command, 'utf16le').toString('base64');
 
     return new Promise((resolve) => {
-      // Use EncodedCommand for reliable execution.
       exec(`powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encodedCommand}`, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
           if (error) {
               console.error('Error scanning backup folder with PowerShell:', stderr);
@@ -310,12 +311,11 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
                   return;
               }
               const drivers = JSON.parse(stdout);
-              // Handle cases where PowerShell returns a single object instead of an array
               const driverArray = Array.isArray(drivers) ? drivers : (drivers ? [drivers] : []);
               
               const result = driverArray.map((d, index) => ({
                   ...d,
-                  id: `${d.fullInfPath}-${d.originalName}-${index}`, // Ensure unique ID
+                  id: `${d.fullInfPath}-${d.originalName}-${index}`,
                   displayName: `${d.provider || 'Unknown'} - ${d.className || d.originalName}`,
                   infName: d.originalName,
               }));

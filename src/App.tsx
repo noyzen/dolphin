@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { OpenDialogOptions } from 'electron';
-import type { DriverFromBackup } from '../electron/preload';
 
 declare module 'react' {
   interface CSSProperties {
@@ -14,6 +13,13 @@ interface DriverInfo {
   originalName: string;
   provider: string;
   className: string;
+}
+
+interface DriverFromBackup {
+  id: string;
+  displayName: string;
+  infName: string;
+  fullInfPath: string;
 }
 
 type LogType = 'START' | 'OUTPUT' | 'END_SUCCESS' | 'END_ERROR' | 'INFO' | 'WARN';
@@ -47,6 +53,7 @@ declare global {
       getWindowsPath: () => Promise<string>;
       getSetting: (key: string) => Promise<any>;
       setSetting: (key: string, value: any) => void;
+      validatePath: (path: string) => Promise<boolean>;
       scanBackupFolder: (folderPath: string) => Promise<DriverFromBackup[]>;
       onCommandStart: (callback: (description: string) => void) => () => void;
       onCommandOutput: (callback: (output: string) => void) => () => void;
@@ -226,8 +233,12 @@ const App: React.FC = () => {
       setIsBusy(false);
       setCurrentOperation('');
       addLog('END_SUCCESS', `Scan complete. Found ${foundDrivers.length} driver packages.`);
-      addNotification('info', 'اسکن کامل شد', `تعداد ${foundDrivers.length} درایور در پوشه یافت شد.`);
-  }, [addNotification]);
+      if (foundDrivers.length > 0) {
+        addNotification('info', 'اسکن کامل شد', `تعداد ${foundDrivers.length} درایور در پوشه یافت شد.`);
+      } else {
+        addNotification('warning', 'اسکن کامل شد', `هیچ درایوری در پوشه انتخاب شده یافت نشد.`);
+      }
+  }, [addNotification, addLog]);
 
 
   useEffect(() => {
@@ -235,16 +246,27 @@ const App: React.FC = () => {
     addLog('INFO', 'Application initialized.');
     const cleanupWindowState = window.electronAPI.onWindowStateChange(setIsMaximized);
     window.electronAPI.getWindowsPath().then(setWindowsPath);
+
+    const validateAndSetPath = async (key: string, setter: React.Dispatch<React.SetStateAction<string>>, scanCallback?: (path: string) => void) => {
+        const path = await window.electronAPI.getSetting(key) || '';
+        if (path) {
+            const isValid = await window.electronAPI.validatePath(path);
+            if (isValid) {
+                setter(path);
+                if (scanCallback) scanCallback(path);
+            } else {
+                addNotification('warning', 'مسیر نامعتبر', `پوشه ذخیره شده یافت نشد: ${path}`);
+                setter(''); // Clear the invalid path from state
+                window.electronAPI.setSetting(key, ''); // And clear from store
+            }
+        }
+    };
     
     const loadSettings = async () => {
-        setBackupPath(await window.electronAPI.getSetting('backupPath') || '');
-        setRestorePath(await window.electronAPI.getSetting('restorePath') || '');
-        setSelectiveBackupPath(await window.electronAPI.getSetting('selectiveBackupPath') || '');
-        const folder = await window.electronAPI.getSetting('selectiveRestoreFolder') || '';
-        if (folder) {
-            setSelectiveRestoreFolder(folder);
-            scanBackupFolder(folder);
-        }
+        await validateAndSetPath('backupPath', setBackupPath);
+        await validateAndSetPath('restorePath', setRestorePath);
+        await validateAndSetPath('selectiveBackupPath', setSelectiveBackupPath);
+        await validateAndSetPath('selectiveRestoreFolder', setSelectiveRestoreFolder, scanBackupFolder);
     };
     loadSettings();
     
@@ -277,7 +299,7 @@ const App: React.FC = () => {
         
         if (currentOperation) {
             if (success) {
-                addNotification('success', 'عملیat موفق', `${currentOperation} با موفقیت به پایان رسید.`);
+                addNotification('success', 'عملیات موفق', `${currentOperation} با موفقیت به پایان رسید.`);
             } else {
                 addNotification('error', 'عملیات ناموفق', `${currentOperation} با خطا مواجه شد. به لاگ‌ها مراجعه کنید.`);
             }
@@ -291,7 +313,7 @@ const App: React.FC = () => {
       cleanupOutput();
       cleanupEnd();
     };
-  }, [currentOperation, addNotification, scanBackupFolder]);
+  }, []); // Removed dependencies to run only once on mount
   
   const createPathSetter = (stateSetter: React.Dispatch<React.SetStateAction<string>>, key: string) => {
     return (path: string) => {
@@ -315,13 +337,15 @@ const App: React.FC = () => {
 
   const handleFullBackup = () => {
     if (!backupPath || isBusy) return;
+    addLog('INFO', `Checking if backup destination is empty: ${backupPath}`);
+    // Note: Overwrite detection can be added here by checking if folder is empty
     const command = `dism /online /export-driver /destination:"${backupPath}"`;
     window.electronAPI.runCommand(command, "در حال خروجی گرفتن از تمام درایورهای شخص ثالث");
   };
 
   const handleCreateRestorePoint = async () => {
     if (isBusy) return;
-    const command = `Checkpoint-Computer -Description 'DriverDolphin Pre-Restore Point' -RestorePointType 'MODIFY_SETTINGS'`;
+    const command = `powershell -Command "Checkpoint-Computer -Description 'DriverDolphin Pre-Restore Point' -RestorePointType 'MODIFY_SETTINGS'"`;
     
     setIsBusy(true);
     setCurrentOperation("در حال ایجاد یک نقطه بازیابی سیستم جدید");
@@ -354,11 +378,13 @@ const App: React.FC = () => {
     if (!restorePath || isBusy) return;
     const command = `pnputil /add-driver "${restorePath}\\*.inf" /subdirs /install`;
     window.electronAPI.runCommand(command, `در حال نصب تمام درایورها از "${restorePath}"`);
+    addNotification('info', 'راهنمایی', 'برای مشاهده جزئیات نصب (درایورهای نصب شده یا رد شده) به لاگ‌ها مراجعه کنید.');
   };
 
   const handleScanDrivers = async () => {
     if (isBusy) return;
-    const command = `Get-WindowsDriver -Online | Where-Object { !$_.Inbox } | Select-Object @{n='publishedName';e={$_.Driver}}, @{n='originalName';e={$_.OriginalFileName}}, @{n='provider';e={$_.ProviderName}}, @{n='className';e={$_.ClassName}} | ConvertTo-Json -Compress`;
+    const command = `powershell -NoProfile -ExecutionPolicy Bypass -Command "@(Get-WindowsDriver -Online | Where-Object { !$_.Inbox } | Select-Object @{n='publishedName';e={$_.Driver}}, @{n='originalName';e={$_.OriginalFileName}}, @{n='provider';e={$_.ProviderName}}, @{n='className';e={$_.ClassName}}) | ConvertTo-Json"`;
+
     setDrivers([]);
     setSelectedDrivers(new Set());
     
@@ -375,19 +401,21 @@ const App: React.FC = () => {
     }
     
     let parsedDrivers: DriverInfo[] = [];
-    if (stdout) {
+    if (stdout && stdout.trim()) {
         try {
-            parsedDrivers = stdout.trim().split('\n').map(line => JSON.parse(line));
+            parsedDrivers = JSON.parse(stdout.trim());
             setDrivers(parsedDrivers);
             if (parsedDrivers.length > 0) {
                 addLog('INFO', `${parsedDrivers.length} drivers found and processed.`);
             } else {
                  addLog('INFO', `Scan complete, no third-party drivers found.`);
             }
-        } catch (e) {
-            addLog('END_ERROR', 'Failed to parse driver scan output.');
+        } catch (e: any) {
+            addLog('END_ERROR', `Failed to parse driver scan output: ${e.message}`);
             success = false;
         }
+    } else {
+      addLog('INFO', `Scan complete, no third-party drivers found.`);
     }
     
     addLog(success ? 'END_SUCCESS' : 'END_ERROR', `Scan process finished with exit code ${code}.`);
@@ -429,6 +457,7 @@ const App: React.FC = () => {
       const fileRepoPath = `${windowsPath}\\System32\\DriverStore\\FileRepository`;
       const infNames = selectedDriverInfo.map(d => d.originalName.replace('.inf', ''));
       
+      addLog('INFO', `Checking if selective backup destination is empty: ${selectiveBackupPath}`);
       const whereClauses = infNames.map(n => `($_.Name -like '${n}*')`).join(' -or ');
       const command = `Get-ChildItem -Path '${fileRepoPath}' -Recurse -Directory | Where-Object { ${whereClauses} } | Copy-Item -Destination '${selectiveBackupPath}' -Recurse -Container -Force`;
       
@@ -439,6 +468,7 @@ const App: React.FC = () => {
       if (selectedDriversFromBackup.size === 0 || isBusy) return;
       const command = Array.from(selectedDriversFromBackup).map(path => `pnputil /add-driver "${path}" /install`).join(' & ');
       window.electronAPI.runCommand(command, `در حال نصب ${selectedDriversFromBackup.size} درایور انتخاب شده`);
+      addNotification('info', 'راهنمایی', 'برای مشاهده جزئیات نصب (درایورهای نصب شده یا رد شده) به لاگ‌ها مراجعه کنید.');
   };
   
   const toggleBackupDriverSelection = (fullInfPath: string) => {
@@ -638,12 +668,14 @@ const App: React.FC = () => {
                 <button onClick={() => navigator.clipboard.writeText(logs.map(l => `[${l.timestamp}] [${l.type}] ${l.message}`).join('\n'))} className="btn-secondary" aria-label="Copy Logs"><i className="fas fa-copy"></i></button>
                 <button onClick={() => setLogs([])} className="btn-secondary" aria-label="Clear Logs"><i className="fas fa-trash"></i></button>
             </div>
-            <div ref={logContainerRef} className="flex-grow bg-gray-900/80 rounded-lg ring-1 ring-white/10 p-4 font-mono text-xs overflow-y-auto whitespace-pre-wrap dir-rtl text-right">
+            <div ref={logContainerRef} className="flex-grow bg-gray-900/80 rounded-lg ring-1 ring-white/10 p-4 font-mono text-xs overflow-y-auto whitespace-pre-wrap">
                 {filteredLogs.map(log => (
-                    <div key={log.id} className="flex items-baseline">
-                        <span className="text-gray-500 ml-4">{log.timestamp}</span>
-                        <span className={`w-24 flex-shrink-0 font-bold ${logTypeStyles[log.type]}`}>{`[${log.type}]`}</span>
-                        <span className={`flex-grow ${logTypeStyles[log.type]}`}>{log.message}</span>
+                    <div key={log.id} className="flex justify-between items-baseline gap-4 py-1" dir="rtl">
+                        <span className={`flex-grow text-right ${logTypeStyles[log.type]}`}>{log.message}</span>
+                        <div className="flex items-baseline flex-shrink-0">
+                            <span className={`w-24 flex-shrink-0 font-bold text-center ${logTypeStyles[log.type]}`}>{`[${log.type}]`}</span>
+                            <span className="text-gray-500 w-20 text-left">{log.timestamp}</span>
+                        </div>
                     </div>
                 ))}
             </div>

@@ -187,6 +187,17 @@ ipcMain.on('set-setting', (_, { key, value }: { key: keyof AppStore, value: any 
   store.set(key, value);
 });
 
+// Path validation
+ipcMain.handle('validate-path', async (_, path: string) => {
+  try {
+    await fs.access(path);
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+
 // Scan backup folder for drivers
 ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
   try {

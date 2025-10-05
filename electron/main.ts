@@ -199,156 +199,171 @@ ipcMain.handle('validate-path', async (_, path: string) => {
 
 // Scan backup folder for drivers
 ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ drivers: any[], errors: string[] }> => {
-  const errors: string[] = [];
-  const logError = (msg: string) => {
-      console.error(msg); // Keep console logging for dev
-      errors.push(msg);
-  };
-  
-  try {
-    // Sanitize the path for inclusion in a PowerShell string. Single quotes are escaped by doubling them.
-    const sanitizedFolderPath = folderPath.replace(/'/g, "''");
+    const errors: string[] = [];
+    const logError = (msg: string) => {
+        console.error(msg); // Keep console logging for dev
+        errors.push(msg);
+    };
 
-    // PowerShell script now finds the files itself, avoiding the command-length limit.
-    const command = `
-        $rootPath = '${sanitizedFolderPath}';
-        try {
-            $infFiles = Get-ChildItem -Path $rootPath -Recurse -Filter *.inf -ErrorAction Stop;
-        } catch {
-            # This block catches errors from Get-ChildItem, like if the directory doesn't exist
-            Write-Output "[]"
-            # Use Write-Error to communicate the problem back to the stderr stream
-            Write-Error "Failed to read directory '$rootPath': $_.Exception.Message"
-            exit 1
-        }
-        
-        $allDrivers = @();
-        foreach ($infFile in $infFiles) {
-            $infPath = $infFile.FullName
+    let tempScriptPath = '';
+
+    try {
+        // The script now accepts the root path as a parameter. This avoids command length limits.
+        const scriptContent = `
+            param(
+                [string]$RootPath
+            )
+            
             try {
-                # Attempt to read with auto-detection; this is more robust than forcing an encoding.
-                $infContent = Get-Content -Path $infPath -ErrorAction Stop -Raw;
-                $strings = @{};
-                
-                if ($infContent -match '(?msi)\\[Strings\\]\\s*\\r?\\n(.*?)(?:\\r?\\n\\[|$)') {
-                    $stringSection = $Matches[1];
-                    $stringSection.Split([System.Environment]::NewLine) | ForEach-Object {
-                        if ($_ -match '^\\s*([^;=\\s]+)\\s*=\\s*(.*)$') {
-                            $key = $Matches[1].Trim()
-                            $value = $Matches[2].Trim().Trim('"')
-                            if ($key) {
-                                $strings[$key] = $value
-                            }
-                        }
-                    };
-                }
-                
-                if ($infContent -match '(?msi)\\[Version\\]\\s*\\r?\\n(.*?)(?:\\r?\\n\\[|$)') {
-                    $versionSection = $Matches[1];
-                    $props = @{
-                        provider = '';
-                        className = '';
-                        version = '';
-                        originalName = (Split-Path $infPath -Leaf);
-                        fullInfPath = $infPath;
-                    };
-
-                    $versionSection.Split([System.Environment]::NewLine) | ForEach-Object {
-                        if ($_ -match '^\\s*Provider\\s*=\\s*(.*)$') {
-                            $val = $Matches[1].Trim().Trim('"');
-                            if ($val.StartsWith('%') -and $val.EndsWith('%')) {
-                                $key = $val.Substring(1, $val.Length - 2);
-                                if ($strings.ContainsKey($key)) {
-                                    $props.provider = $strings[$key];
-                                } else {
-                                    $props.provider = $key;
-                                }
-                            } else {
-                                $props.provider = $val;
-                            }
-                        }
-                        elseif ($_ -match '^\\s*Class\\s*=\\s*(.*)$') {
-                            $props.className = $Matches[1].Trim().Trim('"');
-                        }
-                        elseif ($_ -match '^\\s*DriverVer\\s*=\\s*.*?\\,\\s*([\\d\\.]+)$') {
-                            $props.version = $Matches[1].Trim();
-                        }
-                    };
-
-                    if ($props.provider -and $props.version) {
-                         $allDrivers += New-Object psobject -Property $props;
-                    }
-                }
-
+                $infFiles = Get-ChildItem -Path $RootPath -Recurse -Filter *.inf -ErrorAction Stop;
             } catch {
-                # Report errors as a special object instead of silently failing.
-                $errorRecord = @{
-                    isError = $true;
-                    infPath = $infPath;
-                    message = $_.Exception.Message;
+                # This block catches errors from Get-ChildItem, like if the directory doesn't exist
+                Write-Output "[]"
+                # Use Write-Error to communicate the problem back to the stderr stream
+                Write-Error "Failed to read directory '$RootPath': $_.Exception.Message"
+                exit 1
+            }
+            
+            $allDrivers = @();
+            foreach ($infFile in $infFiles) {
+                $infPath = $infFile.FullName
+                try {
+                    # Attempt to read with auto-detection; this is more robust than forcing an encoding.
+                    $infContent = Get-Content -Path $infPath -ErrorAction Stop -Raw;
+                    $strings = @{};
+                    
+                    if ($infContent -match '(?msi)\\[Strings\\]\\s*\\r?\\n(.*?)(?:\\r?\\n\\[|$)') {
+                        $stringSection = $Matches[1];
+                        $stringSection.Split([System.Environment]::NewLine) | ForEach-Object {
+                            if ($_ -match '^\\s*([^;=\\s]+)\\s*=\\s*(.*)$') {
+                                $key = $Matches[1].Trim()
+                                $value = $Matches[2].Trim().Trim('"')
+                                if ($key) {
+                                    $strings[$key] = $value
+                                }
+                            }
+                        };
+                    }
+                    
+                    if ($infContent -match '(?msi)\\[Version\\]\\s*\\r?\\n(.*?)(?:\\r?\\n\\[|$)') {
+                        $versionSection = $Matches[1];
+                        $props = @{
+                            provider = '';
+                            className = '';
+                            version = '';
+                            originalName = (Split-Path $infPath -Leaf);
+                            fullInfPath = $infPath;
+                        };
+
+                        $versionSection.Split([System.Environment]::NewLine) | ForEach-Object {
+                            if ($_ -match '^\\s*Provider\\s*=\\s*(.*)$') {
+                                $val = $Matches[1].Trim().Trim('"');
+                                if ($val.StartsWith('%') -and $val.EndsWith('%')) {
+                                    $key = $val.Substring(1, $val.Length - 2);
+                                    if ($strings.ContainsKey($key)) {
+                                        $props.provider = $strings[$key];
+                                    } else {
+                                        $props.provider = $key;
+                                    }
+                                } else {
+                                    $props.provider = $val;
+                                }
+                            }
+                            elseif ($_ -match '^\\s*Class\\s*=\\s*(.*)$') {
+                                $props.className = $Matches[1].Trim().Trim('"');
+                            }
+                            elseif ($_ -match '^\\s*DriverVer\\s*=\\s*.*?\\,\\s*([\\d\\.]+)$') {
+                                $props.version = $Matches[1].Trim();
+                            }
+                        };
+
+                        if ($props.provider -and $props.version) {
+                             $allDrivers += New-Object psobject -Property $props;
+                        }
+                    }
+
+                } catch {
+                    # Report errors as a special object instead of silently failing.
+                    $errorRecord = @{
+                        isError = $true;
+                        infPath = $infPath;
+                        message = $_.Exception.Message;
+                    }
+                    $allDrivers += New-Object psobject -Property $errorRecord;
                 }
-                $allDrivers += New-Object psobject -Property $errorRecord;
+            }
+            $allDrivers | ConvertTo-Json -Compress
+        `;
+
+        // Create a temporary file to hold the script
+        tempScriptPath = path.join(os.tmpdir(), `driver-dolphin-scan-${Date.now()}.ps1`);
+        await fs.writeFile(tempScriptPath, scriptContent, { encoding: 'utf8' });
+
+        // Execute the script from the temporary file, passing the folder path as an argument.
+        // Enclosing paths in double quotes is crucial for paths with spaces.
+        const command = `powershell -NoProfile -ExecutionPolicy Bypass -File "${tempScriptPath}" -RootPath "${folderPath}"`;
+
+        return new Promise((resolve) => {
+            exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+                if (error) {
+                    const errorMsg = stderr ? `Stderr: ${stderr}` : `Error: ${error.message}`;
+                    logError(`PowerShell execution failed. ${errorMsg}`);
+                    resolve({ drivers: [], errors });
+                    return;
+                }
+                if (stderr) {
+                    logError(`PowerShell process wrote to stderr: ${stderr}`);
+                }
+
+                try {
+                    if (!stdout.trim() || stdout.trim() === '[]') {
+                        errors.push(`Scan complete: No .inf files found or processed in directory: ${folderPath}`);
+                        resolve({ drivers: [], errors });
+                        return;
+                    }
+                    const results = JSON.parse(stdout);
+                    const resultsArray = Array.isArray(results) ? results : (results ? [results] : []);
+
+                    const successfulDrivers: any[] = [];
+                    resultsArray.forEach(item => {
+                        if (item.isError) {
+                            logError(`Failed to parse INF '${path.basename(item.infPath)}': ${item.message.split('\n')[0]}`);
+                        } else {
+                            successfulDrivers.push(item);
+                        }
+                    });
+
+                    const formattedDrivers = successfulDrivers.map((d, index) => ({
+                        ...d,
+                        id: `${d.fullInfPath}-${d.originalName}-${index}`,
+                        displayName: `${d.provider || 'Unknown'} - ${d.className || d.originalName}`,
+                        infName: d.originalName,
+                    }));
+
+                    resolve({ drivers: formattedDrivers, errors });
+                } catch (e: any) {
+                    logError(`Error parsing driver info JSON from PowerShell. Raw Output: ${stdout}. Error: ${e.message}`);
+                    resolve({ drivers: [], errors });
+                }
+            });
+        });
+
+    } catch (error: any) {
+        logError(`An unexpected error occurred in scan-backup-folder: ${error.message}`);
+        return { drivers: [], errors };
+    } finally {
+        // Clean up the temporary script file
+        if (tempScriptPath) {
+            try {
+                await fs.unlink(tempScriptPath);
+            } catch (cleanupError: any) {
+                // Log cleanup error but don't throw, as the main operation result is more important.
+                console.error(`Failed to clean up temporary script file: ${tempScriptPath}`, cleanupError);
             }
         }
-        $allDrivers | ConvertTo-Json -Compress
-    `;
-
-    // Encode the command to prevent shell interpretation issues with quotes and newlines.
-    const encodedCommand = Buffer.from(command, 'utf16le').toString('base64');
-
-    return new Promise((resolve) => {
-      exec(`powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encodedCommand}`, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
-          if (error) {
-              // Now, stderr might contain useful info from our script's Write-Error
-              const errorMsg = stderr ? `Stderr: ${stderr}` : `Error: ${error.message}`;
-              logError(`PowerShell execution failed. ${errorMsg}`);
-              resolve({ drivers: [], errors });
-              return;
-          }
-          if (stderr) {
-              // Log non-fatal stderr output for diagnostics
-              logError(`PowerShell process wrote to stderr: ${stderr}`);
-          }
-
-          try {
-              if (!stdout.trim() || stdout.trim() === '[]') {
-                  // Handle case where no drivers are found or script returns empty array
-                  errors.push(`Scan complete: No .inf files found or processed in directory: ${folderPath}`);
-                  resolve({ drivers: [], errors });
-                  return;
-              }
-              const results = JSON.parse(stdout);
-              const resultsArray = Array.isArray(results) ? results : (results ? [results] : []);
-              
-              const successfulDrivers: any[] = [];
-              resultsArray.forEach(item => {
-                if (item.isError) {
-                  logError(`Failed to parse INF '${path.basename(item.infPath)}': ${item.message.split('\n')[0]}`);
-                } else {
-                  successfulDrivers.push(item);
-                }
-              });
-              
-              const formattedDrivers = successfulDrivers.map((d, index) => ({
-                  ...d,
-                  id: `${d.fullInfPath}-${d.originalName}-${index}`,
-                  displayName: `${d.provider || 'Unknown'} - ${d.className || d.originalName}`,
-                  infName: d.originalName,
-              }));
-
-              resolve({ drivers: formattedDrivers, errors });
-          } catch (e: any) {
-              logError(`Error parsing driver info JSON from PowerShell. Raw Output: ${stdout}. Error: ${e.message}`);
-              resolve({ drivers: [], errors });
-          }
-      });
-    });
-
-  } catch (error: any) {
-    logError(`An unexpected error occurred in scan-backup-folder: ${error.message}`);
-    return { drivers: [], errors };
-  }
+    }
 });
+
 
 
 // Check if a folder is empty

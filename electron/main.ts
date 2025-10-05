@@ -1,6 +1,8 @@
-import { app, BrowserWindow, globalShortcut, session, ipcMain } from 'electron';
+import { app, BrowserWindow, globalShortcut, session, ipcMain, dialog } from 'electron';
 import path from 'path';
 import Store from 'electron-store';
+import { exec } from 'child_process';
+import os from 'os';
 
 // Define the shape of the stored data.
 interface AppStore {
@@ -10,7 +12,7 @@ interface AppStore {
 
 const store = new Store<AppStore>({
   defaults: {
-    windowBounds: { width: 800, height: 600 },
+    windowBounds: { width: 1024, height: 768 },
     isMaximized: false,
   },
 });
@@ -26,6 +28,8 @@ const createWindow = () => {
     height,
     x,
     y,
+    minWidth: 800,
+    minHeight: 600,
     show: false,
     frame: false, // Remove default window frame
     icon: path.join(__dirname, '../../appicon.png'),
@@ -104,15 +108,62 @@ ipcMain.on('close-window', () => {
   mainWindow?.close();
 });
 
+// IPC handlers for Driver Dolphin functionality
+ipcMain.handle('check-admin', async () => {
+  return new Promise<boolean>((resolve) => {
+    // The 'net session' command requires admin privileges and will fail if not elevated.
+    exec('net session', (error) => {
+      resolve(!error);
+    });
+  });
+});
+
+ipcMain.handle('select-dialog', async (event, options: Electron.OpenDialogOptions) => {
+  if (!mainWindow) return [];
+  const result = await dialog.showOpenDialog(mainWindow, options);
+  return result.filePaths;
+});
+
+
+ipcMain.on('run-command', (event, command: string, description: string) => {
+  const webContents = event.sender;
+  webContents.send('command-start', description);
+  
+  const child = exec(command, { encoding: 'utf8', maxBuffer: 1024 * 1024 * 5 }); // 5MB buffer
+
+  child.stdout?.on('data', (data) => {
+    webContents.send('command-output', data.toString());
+  });
+
+  child.stderr?.on('data', (data) => {
+    webContents.send('command-output', `ERROR: ${data.toString()}`);
+  });
+
+  child.on('close', (code) => {
+    webContents.send('command-end', code);
+  });
+});
+
+ipcMain.handle('check-system-restore', async () => {
+  return new Promise<boolean>((resolve) => {
+    exec('powershell -command "Get-ComputerRestorePoint"', (error, stdout) => {
+       // A simple check: if the command runs without error and produces output,
+       // it's likely enabled. A more robust check might be needed for edge cases.
+      resolve(!error && stdout.length > 0);
+    });
+  });
+});
+
+ipcMain.handle('get-windows-path', () => os.homedir().split(path.sep)[0] + path.sep + 'Windows');
+
+
 app.on('ready', () => {
-  // Set a robust Content Security Policy for all responses. This is the recommended
-  // approach for Electron apps, as it's more secure than a meta tag.
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ws:",
+          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' 'unsafe-eval'; font-src 'self' data:; connect-src 'self' ws:",
         ],
       },
     });
@@ -120,7 +171,6 @@ app.on('ready', () => {
 
   createWindow();
 
-  // Install React DevTools in development
   if (process.env.VITE_DEV_SERVER_URL) {
     import('electron-devtools-installer')
       .then(({ default: installExtension, REACT_DEVELOPER_TOOLS }) => {
@@ -131,20 +181,14 @@ app.on('ready', () => {
       .catch((err) => console.log('Failed to import electron-devtools-installer:', err));
   }
 
-  // Re-register the shortcut for DevTools since setting menu to null disables it.
   globalShortcut.register('CommandOrControl+Shift+I', () => {
-    const focusedWindow = BrowserWindow.getFocusedWindow();
-    if (focusedWindow) {
-      focusedWindow.webContents.toggleDevTools();
-    }
+    BrowserWindow.getFocusedWindow()?.webContents.toggleDevTools();
   });
 });
 
 app.on('will-quit', () => {
-  // Unregister all shortcuts before quitting.
   globalShortcut.unregisterAll();
 });
-
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

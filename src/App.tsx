@@ -85,43 +85,13 @@ const TitleBar: React.FC<{ isMaximized: boolean }> = ({ isMaximized }) => {
   );
 };
 
-const AdminGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const [isAdmin, setIsAdmin] = useState(true);
-
-    useEffect(() => {
-        window.electronAPI.checkAdmin().then(setIsAdmin);
-    }, []);
-
-    if (!isAdmin) {
-        return (
-            <div className="h-screen w-screen bg-black flex flex-col items-center justify-center text-center p-8">
-                <div className="bg-gray-800/50 ring-1 ring-red-500/30 rounded-lg p-10 max-w-lg">
-                    <i className="fas fa-user-shield text-5xl text-red-400 mb-6"></i>
-                    <h1 className="text-3xl font-bold text-red-300 mb-4">Administrator Access Required</h1>
-                    <p className="text-gray-300 mb-8">Driver Dolphin needs to be run as an administrator to manage system drivers. Please restart the application with the correct permissions.</p>
-                    <div className="text-left bg-gray-900/70 p-6 rounded-md ring-1 ring-white/10">
-                        <h2 className="font-bold text-lg text-gray-100 mb-4">How to run as administrator:</h2>
-                        <ol className="list-decimal list-inside space-y-3 text-gray-300">
-                            <li>Close this window.</li>
-                            <li>Find the <strong className="text-green-400">Driver Dolphin</strong> application file or shortcut.</li>
-                            <li><strong className="text-green-400">Right-click</strong> on the icon.</li>
-                            <li>Select <strong className="text-green-400">"Run as administrator"</strong> from the menu.</li>
-                        </ol>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    return <>{children}</>;
-};
-
 const App: React.FC = () => {
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const [activeTab, setActiveTab] = useState('full-backup');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isBusy, setIsBusy] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('Welcome to Driver Dolphin! Ready to start...');
+  const [statusMessage, setStatusMessage] = useState('به Driver Dolphin خوش آمدید! آماده برای شروع...');
   const [logFilter, setLogFilter] = useState('');
 
   // Paths
@@ -148,7 +118,9 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    addLog('INFO', 'Application initialized.');
+    window.electronAPI.checkAdmin().then(setIsAdmin);
+
+    addLog('INFO', 'برنامه راه‌اندازی شد.');
     window.electronAPI.onWindowStateChange(setIsMaximized);
     window.electronAPI.getWindowsPath().then(setWindowsPath);
     
@@ -167,13 +139,13 @@ const App: React.FC = () => {
 
     const cleanupEnd = window.electronAPI.onCommandEnd((code) => {
         const success = code === 0;
-        const message = `Process finished. ${success ? 'Success!' : 'Completed with errors.'}`;
-        addLog(success ? 'END_SUCCESS' : 'END_ERROR', `Process exited with code: ${code}.`);
+        const message = `عملیات پایان یافت. ${success ? 'موفقیت‌آمیز بود.' : 'با خطا خاتمه یافت.'}`;
+        addLog(success ? 'END_SUCCESS' : 'END_ERROR', `فرآیند با کد خروجی ${code} پایان یافت.`);
         setStatusMessage(message);
         setIsBusy(false);
 
         if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
-        statusTimerRef.current = window.setTimeout(() => setStatusMessage('Ready.'), 4000);
+        statusTimerRef.current = window.setTimeout(() => setStatusMessage('آماده.'), 4000);
     });
     
     return () => {
@@ -194,27 +166,27 @@ const App: React.FC = () => {
   const handleFullBackup = () => {
     if (!backupPath || isBusy) return;
     const command = `dism /online /export-driver /destination:"${backupPath}"`;
-    window.electronAPI.runCommand(command, "Exporting all third-party drivers");
+    window.electronAPI.runCommand(command, "در حال خروجی گرفتن از تمام درایورهای شخص ثالث");
   };
 
   const handleCreateRestorePoint = () => {
     if(isBusy) return;
     const command = `powershell.exe -Command "Checkpoint-Computer -Description 'DriverDolphin Pre-Restore Point' -RestorePointType 'MODIFY_SETTINGS'"`;
-    window.electronAPI.runCommand(command, "Creating a new System Restore Point");
+    window.electronAPI.runCommand(command, "در حال ایجاد یک نقطه بازیابی سیستم جدید");
   };
 
   const checkRestoreStatus = () => {
-    addLog('INFO', 'Checking System Restore status...');
+    addLog('INFO', 'در حال بررسی وضعیت System Restore...');
     window.electronAPI.checkSystemRestore().then(status => {
       setIsSystemRestoreEnabled(status);
-      addLog('INFO', `System Restore is ${status ? 'ENABLED' : 'DISABLED'}.`);
+      addLog('INFO', `وضعیت System Restore: ${status ? 'فعال' : 'غیرفعال'}.`);
     });
   };
   
   const handleFullRestore = () => {
     if (!restorePath || isBusy) return;
     const command = `pnputil /add-driver "${restorePath}\\*.inf" /subdirs /install`;
-    window.electronAPI.runCommand(command, `Installing all drivers from "${restorePath}"`);
+    window.electronAPI.runCommand(command, `در حال نصب تمام درایورها از "${restorePath}"`);
   };
 
   const handleScanDrivers = () => {
@@ -228,12 +200,12 @@ const App: React.FC = () => {
     const cleanupEnd = window.electronAPI.onCommandEnd(() => {
         const parsedDrivers = parsePnpUtilOutput(fullOutput.join('\n'));
         setDrivers(parsedDrivers);
-        addLog('INFO', `Found and parsed ${parsedDrivers.length} drivers.`);
+        addLog('INFO', `تعداد ${parsedDrivers.length} درایور پیدا و پردازش شد.`);
         tempOutputListener(); // Remove temporary listener
         cleanupEnd(); // Self-destruct
     });
     
-    window.electronAPI.runCommand(command, "Scanning for all third-party drivers");
+    window.electronAPI.runCommand(command, "در حال اسکن برای یافتن تمام درایورهای شخص ثالث");
   };
 
   const parsePnpUtilOutput = (output: string): DriverInfo[] => {
@@ -277,7 +249,7 @@ const App: React.FC = () => {
       const fileRepoPath = `${windowsPath}\\System32\\DriverStore\\FileRepository`;
       const infNames = selectedDriverInfo.map(d => d.originalName.replace('.inf', ''));
       const command = `powershell -Command "Get-ChildItem -Path '${fileRepoPath}' -Recurse -Directory | Where-Object { $name = $_.Name; ${infNames.map(n => `$name -like '${n}*'`).join(' -or ')} } | Copy-Item -Destination '${selectiveBackupPath}' -Recurse -Container -Force"`;
-      window.electronAPI.runCommand(command, `Backing up ${selectedDrivers.size} selected driver(s)`);
+      window.electronAPI.runCommand(command, `در حال پشتیبان‌گیری از ${selectedDrivers.size} درایور انتخاب شده`);
   };
   
   const handleSelectRestoreFiles = async () => {
@@ -293,7 +265,7 @@ const App: React.FC = () => {
   const handleSelectiveRestore = () => {
       if (selectiveRestoreFiles.length === 0 || isBusy) return;
       const command = selectiveRestoreFiles.map(path => `pnputil /add-driver "${path}" /install`).join(' && ');
-      window.electronAPI.runCommand(command, `Installing ${selectiveRestoreFiles.length} selected driver(s)`);
+      window.electronAPI.runCommand(command, `در حال نصب ${selectiveRestoreFiles.length} درایور انتخاب شده`);
   };
 
   const tabs = [
@@ -441,11 +413,28 @@ const App: React.FC = () => {
       default: return null;
     }
   };
+  
+  const renderAdminGate = () => (
+    <div className="flex-grow flex items-center justify-center p-8 text-center">
+        <div className="bg-gray-800/50 ring-1 ring-red-500/30 rounded-lg p-10 max-w-lg">
+            <i className="fas fa-user-shield text-5xl text-red-400 mb-6"></i>
+            <h1 className="text-3xl font-bold text-red-300 mb-4">نیاز به دسترسی مدیر</h1>
+            <p className="text-gray-300 mb-8">برنامه Driver Dolphin برای مدیریت درایورهای سیستمی نیاز به اجرا با دسترسی مدیر (Administrator) دارد. لطفاً برنامه را با دسترسی مناسب مجدداً اجرا کنید.</p>
+            <div className="text-right bg-gray-900/70 p-6 rounded-md ring-1 ring-white/10">
+                <h2 className="font-bold text-lg text-gray-100 mb-4">چگونه به عنوان مدیر اجرا کنیم:</h2>
+                <ol className="list-decimal list-inside space-y-3 text-gray-300">
+                    <li>این پنجره را ببندید.</li>
+                    <li>فایل اجرایی یا میان‌بر برنامه <strong className="text-green-400">Driver Dolphin</strong> را پیدا کنید.</li>
+                    <li>روی آیکن برنامه <strong className="text-green-400">راست‌کلیک</strong> کنید.</li>
+                    <li>از منوی باز شده گزینه <strong className="text-green-400">"Run as administrator"</strong> را انتخاب کنید.</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+  );
 
-  return (
-    <div className="h-screen w-screen overflow-hidden bg-black flex flex-col">
-      <TitleBar isMaximized={isMaximized} />
-      <div className="pt-8 flex-grow flex flex-col">
+  const renderAppContent = () => (
+     <>
         <nav className="flex-shrink-0 px-6 border-b border-white/10">
             <div className="flex items-center space-x-reverse space-x-4">
                 {tabs.map(tab => (
@@ -476,16 +465,23 @@ const App: React.FC = () => {
                 </div>
             )}
         </footer>
+     </>
+  );
+
+  return (
+    <div className="h-screen w-screen overflow-hidden bg-black flex flex-col">
+      <TitleBar isMaximized={isMaximized} />
+      <div className="pt-8 flex-grow flex flex-col">
+        {isAdmin === null && (
+            <div className="flex-grow flex items-center justify-center">
+                <p className="text-gray-400">در حال بررسی دسترسی‌ها...</p>
+            </div>
+        )}
+        {isAdmin === false && renderAdminGate()}
+        {isAdmin === true && renderAppContent()}
       </div>
     </div>
   );
 };
 
-
-const RootApp: React.FC = () => (
-  <AdminGate>
-    <App />
-  </AdminGate>
-);
-
-export default RootApp;
+export default App;

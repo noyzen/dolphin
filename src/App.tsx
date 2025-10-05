@@ -403,7 +403,9 @@ const App: React.FC = () => {
     let parsedDrivers: DriverInfo[] = [];
     if (stdout && stdout.trim()) {
         try {
-            parsedDrivers = JSON.parse(stdout.trim());
+            const result = JSON.parse(stdout.trim());
+            // Ensure result is an array, as PowerShell's ConvertTo-Json might return a single object if only one driver is found.
+            parsedDrivers = Array.isArray(result) ? result : (result ? [result] : []);
             setDrivers(parsedDrivers);
             if (parsedDrivers.length > 0) {
                 addLog('INFO', `${parsedDrivers.length} drivers found and processed.`);

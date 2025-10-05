@@ -157,7 +157,7 @@ ipcMain.on('run-command', (event, command: string, description: string) => {
 ipcMain.handle('run-command-and-get-output', async (event, command: string) => {
   return new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
     // Using a larger buffer for potentially large driver lists
-    exec(command, { shell: 'powershell.exe', encoding: 'utf8', maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+    exec(command, { encoding: 'utf8', maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
       resolve({
         stdout,
         stderr,

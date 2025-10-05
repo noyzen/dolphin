@@ -21,6 +21,9 @@ interface DriverFromBackup {
   displayName: string;
   infName: string;
   fullInfPath: string;
+  provider: string;
+  className: string;
+  version: string;
 }
 
 type LogType = 'START' | 'OUTPUT' | 'END_SUCCESS' | 'END_ERROR' | 'INFO' | 'WARN';
@@ -403,12 +406,109 @@ const App: React.FC = () => {
     const command = `powershell -Command "Checkpoint-Computer -Description 'DriverDolphin Pre-Restore Point' -RestorePointType 'MODIFY_SETTINGS'"`;
     window.electronAPI.runCommand(command, "در حال ایجاد یک نقطه بازیابی سیستم جدید");
   };
+
+  const handleRestoreProcess = async (driversToRestore: DriverFromBackup[]) => {
+      const command = `powershell -NoProfile -ExecutionPolicy Bypass -Command "@(Get-WindowsDriver -Online | Select-Object @{n='publishedName';e={$_.Driver}}, @{n='originalName';e={$_.OriginalFileName}}, @{n='provider';e={$_.ProviderName}}, @{n='className';e={$_.ClassName}}, @{n='version';e={$_.DriverVersion}}) | ConvertTo-Json"`;
+      addLog('INFO', 'Scanning currently installed drivers for comparison.');
+      setCurrentOperation("در حال بررسی درایورهای نصب شده...");
+      setIsBusy(true);
+
+      const { stdout, code } = await window.electronAPI.runCommandAndGetOutput(command);
+      if (code !== 0 || !stdout.trim()) {
+          addLog('END_ERROR', 'Failed to get list of installed drivers.');
+          addNotification('error', 'خطا', 'لیست درایورهای نصب شده برای مقایسه دریافت نشد.');
+          setIsBusy(false);
+          setCurrentOperation('');
+          return;
+      }
+
+      let installedDrivers: DriverInfo[] = [];
+      try {
+        installedDrivers = JSON.parse(stdout.trim());
+      } catch (e) {
+        addLog('END_ERROR', 'Failed to parse list of installed drivers.');
+        addNotification('error', 'خطا', 'Parsing installed driver list failed.');
+        setIsBusy(false);
+        setCurrentOperation('');
+        return;
+      }
+
+      const driversToInstallPaths = new Set<string>();
+      let replaceAllConfirmed = false;
+
+      for (const backupDriver of driversToRestore) {
+          const existingDriver = installedDrivers.find(
+              (d) => d.originalName === backupDriver.infName && d.version === backupDriver.version
+          );
+
+          if (existingDriver) {
+              if (replaceAllConfirmed) {
+                  driversToInstallPaths.add(backupDriver.fullInfPath);
+                  continue;
+              }
+
+              setCurrentOperation(`در انتظار تایید کاربر برای ${backupDriver.displayName}`);
+              const response = await window.electronAPI.showConfirmationDialog({
+                  type: 'question',
+                  title: 'درایور از قبل نصب شده است',
+                  message: `یک درایور با همین نسخه از قبل نصب شده است:`,
+                  detail: `درایور: ${backupDriver.displayName}\nنسخه: ${backupDriver.version}\n\nآیا می‌خواهید آن را جایگزین کنید؟`,
+                  buttons: ['بله', 'خیر', 'بله برای همه', 'لغو'],
+                  defaultId: 1,
+                  cancelId: 3,
+              });
+
+              if (response === 0) { // Yes
+                  driversToInstallPaths.add(backupDriver.fullInfPath);
+              } else if (response === 1) { // No
+                  addLog('INFO', `User skipped reinstalling driver: ${backupDriver.displayName}`);
+              } else if (response === 2) { // Yes to All
+                  replaceAllConfirmed = true;
+                  driversToInstallPaths.add(backupDriver.fullInfPath);
+              } else if (response === 3) { // Cancel
+                  addLog('INFO', 'Restore operation cancelled by user.');
+                  addNotification('info', 'لغو شد', 'عملیات بازیابی توسط کاربر لغو شد.');
+                  setIsBusy(false);
+                  setCurrentOperation('');
+                  return;
+              }
+          } else {
+              driversToInstallPaths.add(backupDriver.fullInfPath);
+          }
+      }
+
+      const finalPaths = Array.from(driversToInstallPaths);
+      if (finalPaths.length > 0) {
+          const installCommand = finalPaths.map(path => `pnputil /add-driver "${path}" /install`).join(' & ');
+          window.electronAPI.runCommand(installCommand, `در حال نصب ${finalPaths.length} درایور`);
+          addNotification('info', 'نصب شروع شد', 'برای مشاهده جزئیات نصب هر درایور به لاگ‌ها مراجعه کنید.');
+      } else {
+          addLog('INFO', 'No drivers required installation.');
+          addNotification('info', 'بروز است', 'تمام درایورهای انتخاب شده از قبل نصب شده‌اند.');
+          setIsBusy(false);
+          setCurrentOperation('');
+      }
+  };
   
-  const handleFullRestore = () => {
+  const handleFullRestore = async () => {
     if (!restorePath || isBusy) return;
-    const command = `pnputil /add-driver "${restorePath}\\*.inf" /subdirs /install`;
-    window.electronAPI.runCommand(command, `در حال نصب تمام درایورها از "${restorePath}"`);
-    addNotification('info', 'راهنمایی', 'برای مشاهده جزئیات نصب (درایورهای نصب شده یا رد شده) به لاگ‌ها مراجعه کنید.');
+
+    setIsBusy(true);
+    setCurrentOperation(`در حال اسکن پوشه پشتیبان: ${restorePath}`);
+    addLog('START', `Scanning backup folder for full restore: ${restorePath}`);
+    
+    const driversInBackup = await window.electronAPI.scanBackupFolder(restorePath);
+    
+    if (driversInBackup.length === 0) {
+        addLog('END_ERROR', 'No drivers found in the specified folder.');
+        addNotification('warning', 'درایوری یافت نشد', 'پوشه انتخاب شده حاوی پکیج درایور معتبری نیست.');
+        setIsBusy(false);
+        setCurrentOperation('');
+        return;
+    }
+
+    addLog('INFO', `Scan complete. Found ${driversInBackup.length} driver definitions.`);
+    await handleRestoreProcess(driversInBackup);
   };
 
   const handleScanDrivers = async () => {
@@ -509,18 +609,17 @@ const App: React.FC = () => {
   
   const handleSelectiveRestore = () => {
       if (selectedDriversFromBackup.size === 0 || isBusy) return;
-      const command = Array.from(selectedDriversFromBackup).map(path => `pnputil /add-driver "${path}" /install`).join(' & ');
-      window.electronAPI.runCommand(command, `در حال نصب ${selectedDriversFromBackup.size} درایور انتخاب شده`);
-      addNotification('info', 'راهنمایی', 'برای مشاهده جزئیات نصب (درایورهای نصب شده یا رد شده) به لاگ‌ها مراجعه کنید.');
+      const driversToRestore = driversFromBackup.filter(d => selectedDriversFromBackup.has(d.id));
+      handleRestoreProcess(driversToRestore);
   };
   
-  const toggleBackupDriverSelection = (fullInfPath: string) => {
+  const toggleBackupDriverSelection = (driverId: string) => {
     setSelectedDriversFromBackup(prev => {
         const newSet = new Set(prev);
-        if (newSet.has(fullInfPath)) {
-            newSet.delete(fullInfPath);
+        if (newSet.has(driverId)) {
+            newSet.delete(driverId);
         } else {
-            newSet.add(fullInfPath);
+            newSet.add(driverId);
         }
         return newSet;
     });
@@ -531,18 +630,20 @@ const App: React.FC = () => {
     const lowercasedFilter = selectiveRestoreSearch.toLowerCase();
     return driversFromBackup.filter(driver =>
         driver.displayName.toLowerCase().includes(lowercasedFilter) ||
-        driver.infName.toLowerCase().includes(lowercasedFilter)
+        driver.infName.toLowerCase().includes(lowercasedFilter) ||
+        driver.provider.toLowerCase().includes(lowercasedFilter) ||
+        driver.version.toLowerCase().includes(lowercasedFilter)
     );
   }, [driversFromBackup, selectiveRestoreSearch]);
   
   const handleToggleSelectAllBackupDrivers = () => {
-      const allFilteredSelected = filteredDriversFromBackup.length > 0 && filteredDriversFromBackup.every(d => selectedDriversFromBackup.has(d.fullInfPath));
+      const allFilteredSelected = filteredDriversFromBackup.length > 0 && filteredDriversFromBackup.every(d => selectedDriversFromBackup.has(d.id));
       setSelectedDriversFromBackup(prev => {
           const newSet = new Set(prev);
           if (allFilteredSelected) {
-              filteredDriversFromBackup.forEach(d => newSet.delete(d.fullInfPath));
+              filteredDriversFromBackup.forEach(d => newSet.delete(d.id));
           } else {
-              filteredDriversFromBackup.forEach(d => newSet.add(d.fullInfPath));
+              filteredDriversFromBackup.forEach(d => newSet.add(d.id));
           }
           return newSet;
       });
@@ -702,7 +803,7 @@ const App: React.FC = () => {
                     <input 
                         type="checkbox" 
                         id="select-all-backup-drivers"
-                        checked={filteredDriversFromBackup.length > 0 && filteredDriversFromBackup.every(d => selectedDriversFromBackup.has(d.fullInfPath))}
+                        checked={filteredDriversFromBackup.length > 0 && filteredDriversFromBackup.every(d => selectedDriversFromBackup.has(d.id))}
                         onChange={handleToggleSelectAllBackupDrivers}
                         disabled={filteredDriversFromBackup.length === 0 || isBusy}
                     />
@@ -715,10 +816,10 @@ const App: React.FC = () => {
                 {driversFromBackup.length === 0 && <p className="text-gray-500 text-center p-4">یک پوشه پشتیبان را برای اسکن انتخاب کنید.</p>}
                 {filteredDriversFromBackup.map(driver => (
                     <div key={driver.id} className="driver-list-item">
-                        <input type="checkbox" id={driver.id} checked={selectedDriversFromBackup.has(driver.fullInfPath)} onChange={() => toggleBackupDriverSelection(driver.fullInfPath)} />
-                        <label htmlFor={driver.id} className="flex-grow cursor-pointer text-sm pl-3 font-mono">
+                        <input type="checkbox" id={driver.id} checked={selectedDriversFromBackup.has(driver.id)} onChange={() => toggleBackupDriverSelection(driver.id)} />
+                        <label htmlFor={driver.id} className="flex-grow cursor-pointer text-sm pl-3">
                             <span className="font-bold text-gray-200 block">{driver.displayName}</span>
-                            <span className="text-gray-400 text-xs block">File: {driver.infName}</span>
+                            <span className="text-gray-400 text-xs block">Version: {driver.version} ({driver.infName})</span>
                         </label>
                     </div>
                 ))}

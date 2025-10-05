@@ -197,36 +197,93 @@ ipcMain.handle('validate-path', async (_, path: string) => {
   }
 });
 
+// Helper function to recursively find all .inf files in a directory
+async function findInfFiles(dir: string): Promise<string[]> {
+    let files: string[] = [];
+    try {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                files = files.concat(await findInfFiles(fullPath));
+            } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.inf')) {
+                files.push(fullPath);
+            }
+        }
+    } catch (error) {
+        console.error(`Error reading directory ${dir}:`, error);
+    }
+    return files;
+}
+
 
 // Scan backup folder for drivers
 ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
   try {
-    const entries = await fs.readdir(folderPath, { withFileTypes: true });
-    const driverDirs = entries.filter(entry => entry.isDirectory());
-    const drivers = [];
-    for (const dir of driverDirs) {
-      try {
-        const driverPath = path.join(folderPath, dir.name);
-        const files = await fs.readdir(driverPath);
-        const infFile = files.find(f => f.toLowerCase().endsWith('.inf'));
-        if (infFile) {
-          drivers.push({
-            id: dir.name,
-            displayName: dir.name.split('.')[0] || dir.name, // try to get a cleaner name
-            infName: infFile,
-            fullInfPath: path.join(driverPath, infFile)
-          });
+    const infFiles = await findInfFiles(folderPath);
+    if (infFiles.length === 0) return [];
+    
+    // Sanitize paths for PowerShell and create a comma-separated list of strings
+    const sanitizedInfPaths = infFiles.map(f => `'${f.replace(/'/g, "''")}'`).join(',');
+    const command = `
+        $infPaths = @(${sanitizedInfPaths});
+        $allDrivers = @();
+        foreach ($path in $infPaths) {
+            try {
+                $drivers = Get-WindowsDriver -Path $path;
+                foreach ($driver in $drivers) {
+                    $props = @{
+                        provider = $driver.ProviderName;
+                        className = $driver.ClassName;
+                        version = $driver.DriverVersion;
+                        originalName = $driver.OriginalFileName;
+                        fullInfPath = $path;
+                    }
+                    $allDrivers += New-Object psobject -Property $props
+                }
+            } catch {
+                # Silently ignore .inf files that cannot be processed
+            }
         }
-      } catch (e) {
-        console.warn(`Could not process directory ${dir.name}:`, e);
-      }
-    }
-    return drivers;
+        $allDrivers | ConvertTo-Json -Compress
+    `;
+
+    return new Promise((resolve) => {
+      // Use exec directly to handle PowerShell command
+      exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${command}"`, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+          if (error) {
+              console.error('Error scanning backup folder with PowerShell:', stderr);
+              resolve([]);
+              return;
+          }
+          try {
+              if (!stdout.trim()) {
+                  resolve([]);
+                  return;
+              }
+              const drivers = JSON.parse(stdout);
+              const driverArray = Array.isArray(drivers) ? drivers : [drivers];
+              
+              const result = driverArray.map((d, index) => ({
+                  ...d,
+                  id: `${d.fullInfPath}-${d.originalName}-${index}`,
+                  displayName: `${d.provider || 'Unknown'} - ${d.className || d.originalName}`,
+                  infName: d.originalName,
+              }));
+              resolve(result);
+          } catch (e) {
+              console.error('Error parsing driver info JSON from backup scan:', e, 'Output:', stdout);
+              resolve([]);
+          }
+      });
+    });
+
   } catch (error) {
     console.error('Failed to scan backup folder:', error);
-    return []; // Return empty array on error
+    return [];
   }
 });
+
 
 // Check if a folder is empty
 ipcMain.handle('is-folder-empty', async (_, folderPath: string) => {

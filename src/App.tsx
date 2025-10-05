@@ -181,10 +181,35 @@ const App: React.FC = () => {
     window.electronAPI.runCommand(command, "در حال خروجی گرفتن از تمام درایورهای شخص ثالث");
   };
 
-  const handleCreateRestorePoint = () => {
-    if(isBusy) return;
+  const handleCreateRestorePoint = async () => {
+    if (isBusy) return;
     const command = `powershell.exe -Command "Checkpoint-Computer -Description 'DriverDolphin Pre-Restore Point' -RestorePointType 'MODIFY_SETTINGS'"`;
-    window.electronAPI.runCommand(command, "در حال ایجاد یک نقطه بازیابی سیستم جدید");
+    
+    setIsBusy(true);
+    setStatusMessage("در حال ایجاد یک نقطه بازیابی سیستم جدید...");
+    addLog('START', "شروع ایجاد نقطه بازیابی سیستم");
+
+    const { stdout, stderr, code } = await window.electronAPI.runCommandAndGetOutput(command);
+
+    if (stderr) addLog('OUTPUT', `ERROR: ${stderr}`);
+    if (stdout) addLog('OUTPUT', stdout);
+    
+    const success = code === 0;
+    let message = `عملیات نقطه بازیابی پایان یافت. ${success ? 'موفقیت‌آمیز بود.' : 'با خطا خاتمه یافت.'}`;
+
+    const warningMessage = "one has already been created within the past 1440 minutes";
+    if (success && (stdout.includes(warningMessage) || stderr.includes(warningMessage))) {
+        message = "یک نقطه بازیابی به تازگی ایجاد شده است. ویندوز اجازه ایجاد نقطه جدید را نمی‌دهد.";
+        addLog('WARN', message);
+    } else {
+       addLog(success ? 'END_SUCCESS' : 'END_ERROR', `فرآیند نقطه بازیابی با کد خروجی ${code} پایان یافت.`);
+    }
+
+    setStatusMessage(message);
+    setIsBusy(false);
+
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    statusTimerRef.current = window.setTimeout(() => setStatusMessage('آماده.'), 4000);
   };
   
   const handleFullRestore = () => {
@@ -192,10 +217,42 @@ const App: React.FC = () => {
     const command = `pnputil /add-driver "${restorePath}\\*.inf" /subdirs /install`;
     window.electronAPI.runCommand(command, `در حال نصب تمام درایورها از "${restorePath}"`);
   };
+  
+  const parsePnpUtilOutput = (output: string): DriverInfo[] => {
+    const drivers: DriverInfo[] = [];
+    const blocks = output.split('Published Name :').slice(1);
+
+    for (const block of blocks) {
+        const driver: Partial<DriverInfo> = {};
+        const lines = block.trim().split(/\r?\n/);
+
+        driver.publishedName = lines[0]?.trim();
+        if (!driver.publishedName) continue;
+
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i];
+            const separatorIndex = line.indexOf(':');
+            if (separatorIndex === -1) continue;
+
+            const key = line.substring(0, separatorIndex).trim();
+            const value = line.substring(separatorIndex + 1).trim();
+
+            if (key === 'Original Name') driver.originalName = value;
+            else if (key === 'Provider Name') driver.provider = value;
+            else if (key === 'Class Name') driver.className = value;
+        }
+
+        if (driver.publishedName && driver.originalName && driver.provider && driver.className) {
+            drivers.push(driver as DriverInfo);
+        }
+    }
+    return drivers;
+  };
 
   const handleScanDrivers = async () => {
     if (isBusy) return;
-    const command = `pnputil /enum-drivers`;
+    // Prepending 'chcp 65001' sets the console's code page to UTF-8 to handle various character sets.
+    const command = `chcp 65001 && pnputil /enum-drivers`;
     setDrivers([]);
     setSelectedDrivers(new Set());
     
@@ -208,43 +265,21 @@ const App: React.FC = () => {
     if (stderr) {
         addLog('OUTPUT', `ERROR: ${stderr}`);
     }
-    if (stdout) {
-        const parsedDrivers = parsePnpUtilOutput(stdout);
-        setDrivers(parsedDrivers);
-        addLog('INFO', `تعداد ${parsedDrivers.length} درایور پیدا و پردازش شد.`);
+    
+    const parsedDrivers = parsePnpUtilOutput(stdout);
+    setDrivers(parsedDrivers);
+    if (parsedDrivers.length > 0) {
+      addLog('INFO', `تعداد ${parsedDrivers.length} درایور پیدا و پردازش شد.`);
     }
 
     const success = code === 0;
-    const message = `اسکن درایورها پایان یافت. ${success ? 'موفقیت‌آمیز بود.' : 'با خطا خاتمه یافت.'}`;
+    const message = `اسکن درایورها پایان یافت. ${success ? `${parsedDrivers.length} درایور یافت شد.` : 'با خطا خاتمه یافت.'}`;
     addLog(success ? 'END_SUCCESS' : 'END_ERROR', `فرآیند اسکن با کد خروجی ${code} پایان یافت.`);
     setStatusMessage(message);
     setIsBusy(false);
 
     if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
     statusTimerRef.current = window.setTimeout(() => setStatusMessage('آماده.'), 4000);
-  };
-
-  const parsePnpUtilOutput = (output: string): DriverInfo[] => {
-    const driversMap: Map<string, Partial<DriverInfo>> = new Map();
-    const entries = output.split('Published Name :').slice(1);
-    entries.forEach(entry => {
-        const lines = entry.trim().split('\n');
-        const publishedName = lines[0].trim();
-        if (!publishedName) return;
-
-        const driver: Partial<DriverInfo> = { publishedName };
-        lines.slice(1).forEach(line => {
-            const [key, ...valueParts] = line.split(':');
-            const value = valueParts.join(':').trim();
-            if (key.includes('Original Name')) driver.originalName = value;
-            else if (key.includes('Provider Name')) driver.provider = value;
-            else if (key.includes('Class Name')) driver.className = value;
-        });
-        if(driver.originalName && driver.provider && driver.className) {
-            driversMap.set(publishedName, driver);
-        }
-    });
-    return Array.from(driversMap.values()) as DriverInfo[];
   };
   
   const toggleDriverSelection = (publishedName: string) => {

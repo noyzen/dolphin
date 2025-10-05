@@ -56,6 +56,8 @@ declare global {
       setSetting: (key: string, value: any) => void;
       validatePath: (path: string) => Promise<boolean>;
       scanBackupFolder: (folderPath: string) => Promise<DriverFromBackup[]>;
+      isFolderEmpty: (folderPath: string) => Promise<boolean>;
+      showConfirmationDialog: (options: any) => Promise<number>;
       onCommandStart: (callback: (description: string) => void) => () => void;
       onCommandOutput: (callback: (output: string) => void) => () => void;
       onCommandEnd: (callback: (code: number | null) => void) => () => void;
@@ -125,8 +127,22 @@ const NotificationContainer: React.FC<{ notifications: Notification[]; onDismiss
   );
 };
 
+const AboutModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[101]" onClick={onClose}>
+        <div className="bg-gray-800 rounded-lg shadow-2xl ring-1 ring-white/10 max-w-md w-full text-center p-8 m-4" onClick={e => e.stopPropagation()}>
+            <i className="fas fa-water text-5xl text-green-400 mb-4"></i>
+            <h2 className="text-2xl font-bold text-white mb-2">Driver Dolphin</h2>
+            <p className="text-gray-400 mb-6">A modern, offline-first utility for backing up and restoring Windows drivers.</p>
+            <p className="text-xs text-gray-500 mb-6">Version 1.0.0</p>
+            <button onClick={onClose} className="btn-secondary px-8">بستن</button>
+        </div>
+    </div>
+  );
+};
 
-const TitleBar: React.FC<{ isMaximized: boolean }> = ({ isMaximized }) => {
+
+const TitleBar: React.FC<{ isMaximized: boolean; onAboutClick: () => void; }> = ({ isMaximized, onAboutClick }) => {
   return (
     <div
       style={{ WebkitAppRegion: 'drag' }}
@@ -137,6 +153,15 @@ const TitleBar: React.FC<{ isMaximized: boolean }> = ({ isMaximized }) => {
         <span>Driver Dolphin</span>
       </div>
       <div className="flex items-center h-full">
+         <button
+          onClick={onAboutClick}
+          style={{ WebkitAppRegion: 'no-drag' }}
+          className="w-10 h-full flex items-center justify-center text-gray-400 hover:bg-white/10 hover:text-white transition-colors"
+          aria-label="About"
+          title="About Driver Dolphin"
+        >
+          <i className="fas fa-info-circle text-sm"></i>
+        </button>
         <button
           onClick={() => window.electronAPI.minimizeWindow()}
           style={{ WebkitAppRegion: 'no-drag' }}
@@ -185,6 +210,7 @@ const App: React.FC = () => {
   const [logFilter, setLogFilter] = useState('');
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [currentOperation, setCurrentOperation] = useState('');
+  const [showAboutModal, setShowAboutModal] = useState(false);
 
   // Paths
   const [backupPath, setBackupPath] = useState('');
@@ -192,7 +218,6 @@ const App: React.FC = () => {
   const [selectiveBackupPath, setSelectiveBackupPath] = useState('');
   const [selectiveRestoreFolder, setSelectiveRestoreFolder] = useState('');
 
-  
   // System state
   const [isSystemRestoreEnabled, setIsSystemRestoreEnabled] = useState<boolean | null>(null);
   const [showRestoreWarningBanner, setShowRestoreWarningBanner] = useState(true);
@@ -201,16 +226,18 @@ const App: React.FC = () => {
   const [drivers, setDrivers] = useState<DriverInfo[]>([]);
   const [selectedDrivers, setSelectedDrivers] = useState<Set<string>>(new Set());
   const [windowsPath, setWindowsPath] = useState('');
+  const [selectiveBackupSearch, setSelectiveBackupSearch] = useState('');
   
   // Selective Restore
   const [driversFromBackup, setDriversFromBackup] = useState<DriverFromBackup[]>([]);
   const [selectedDriversFromBackup, setSelectedDriversFromBackup] = useState<Set<string>>(new Set());
+  const [selectiveRestoreSearch, setSelectiveRestoreSearch] = useState('');
 
-  
   const notificationIdCounter = useRef(0);
 
-  const removeNotification = useCallback((id: number) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
+  const addLog = useCallback((type: LogType, message: string) => {
+    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+    setLogs(prev => [...prev, { id: logIdCounter++, timestamp, type, message }]);
   }, []);
 
   const addNotification = useCallback((type: Notification['type'], title: string, message: string) => {
@@ -218,10 +245,9 @@ const App: React.FC = () => {
     setNotifications(prev => [...prev, { id, type, title, message }]);
   }, []);
 
-  const addLog = (type: LogType, message: string) => {
-    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
-    setLogs(prev => [...prev, { id: logIdCounter++, timestamp, type, message }]);
-  };
+  const removeNotification = useCallback((id: number) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  }, []);
 
   const scanBackupFolder = useCallback(async (folder: string) => {
       if (!folder) return;
@@ -239,8 +265,35 @@ const App: React.FC = () => {
       } else {
         addNotification('warning', 'اسکن کامل شد', `هیچ درایوری در پوشه انتخاب شده یافت نشد.`);
       }
-  }, [addNotification, addLog]);
+  }, [addLog, addNotification]);
 
+  const onCommandStart = useCallback((description: string) => {
+      setIsBusy(true);
+      setCurrentOperation(description);
+      addLog('START', `Operation started: ${description}`);
+  }, [addLog]);
+
+  const onCommandOutput = useCallback((output: string) => {
+      const cleanedOutput = output.trim();
+      if (cleanedOutput) {
+         addLog('OUTPUT', cleanedOutput);
+      }
+  }, [addLog]);
+
+  const onCommandEnd = useCallback((code: number | null) => {
+      const success = code === 0;
+      addLog(success ? 'END_SUCCESS' : 'END_ERROR', `Operation finished with exit code ${code}.`);
+      setIsBusy(false);
+      
+      if (currentOperation) {
+          if (success) {
+              addNotification('success', 'عملیات موفق', `${currentOperation} با موفقیت به پایان رسید.`);
+          } else {
+              addNotification('error', 'عملیات ناموفق', `${currentOperation} با خطا مواجه شد. به لاگ‌ها مراجعه کنید.`);
+          }
+      }
+      setCurrentOperation('');
+  }, [addLog, addNotification, currentOperation]);
 
   useEffect(() => {
     window.electronAPI.checkAdmin().then(setIsAdmin);
@@ -257,8 +310,8 @@ const App: React.FC = () => {
                 if (scanCallback) scanCallback(path);
             } else {
                 addNotification('warning', 'مسیر نامعتبر', `پوشه ذخیره شده یافت نشد: ${path}`);
-                setter(''); // Clear the invalid path from state
-                window.electronAPI.setSetting(key, ''); // And clear from store
+                setter('');
+                window.electronAPI.setSetting(key, '');
             }
         }
     };
@@ -280,33 +333,9 @@ const App: React.FC = () => {
       }
     });
     
-    const cleanupStart = window.electronAPI.onCommandStart((description) => {
-        setIsBusy(true);
-        setCurrentOperation(description);
-        addLog('START', `Operation started: ${description}`);
-    });
-
-    const cleanupOutput = window.electronAPI.onCommandOutput((output) => {
-        const cleanedOutput = output.trim();
-        if (cleanedOutput) {
-           addLog('OUTPUT', cleanedOutput);
-        }
-    });
-
-    const cleanupEnd = window.electronAPI.onCommandEnd((code) => {
-        const success = code === 0;
-        addLog(success ? 'END_SUCCESS' : 'END_ERROR', `Operation finished with exit code ${code}.`);
-        setIsBusy(false);
-        
-        if (currentOperation) {
-            if (success) {
-                addNotification('success', 'عملیات موفق', `${currentOperation} با موفقیت به پایان رسید.`);
-            } else {
-                addNotification('error', 'عملیات ناموفق', `${currentOperation} با خطا مواجه شد. به لاگ‌ها مراجعه کنید.`);
-            }
-        }
-        setCurrentOperation('');
-    });
+    const cleanupStart = window.electronAPI.onCommandStart(onCommandStart);
+    const cleanupOutput = window.electronAPI.onCommandOutput(onCommandOutput);
+    const cleanupEnd = window.electronAPI.onCommandEnd(onCommandEnd);
     
     return () => {
       cleanupWindowState();
@@ -314,7 +343,7 @@ const App: React.FC = () => {
       cleanupOutput();
       cleanupEnd();
     };
-  }, []); // Removed dependencies to run only once on mount
+  }, [addLog, addNotification, onCommandStart, onCommandOutput, onCommandEnd, scanBackupFolder]);
   
   const createPathSetter = (stateSetter: React.Dispatch<React.SetStateAction<string>>, key: string) => {
     return (path: string) => {
@@ -336,10 +365,28 @@ const App: React.FC = () => {
     }
   };
 
-  const handleFullBackup = () => {
+  const confirmNonEmptyFolder = async (path: string): Promise<boolean> => {
+    const isEmpty = await window.electronAPI.isFolderEmpty(path);
+    if (!isEmpty) {
+        const response = await window.electronAPI.showConfirmationDialog({
+            type: 'warning',
+            title: 'پوشه مقصد خالی نیست',
+            message: 'پوشه مقصد انتخاب شده حاوی فایل‌هایی است. فایل‌های موجود ممکن است رونویسی شوند.\n\nآیا می‌خواهید ادامه دهید؟',
+            buttons: ['ادامه پشتیبان‌گیری', 'لغو'],
+            defaultId: 1,
+            cancelId: 1,
+        });
+        if (response === 1) { // User cancelled
+            addLog('INFO', 'Backup cancelled by user due to non-empty destination.');
+            return false;
+        }
+    }
+    return true;
+  };
+
+  const handleFullBackup = async () => {
     if (!backupPath || isBusy) return;
-    addLog('INFO', `Checking if backup destination is empty: ${backupPath}`);
-    // Note: Overwrite detection can be added here by checking if folder is empty
+    if (!(await confirmNonEmptyFolder(backupPath))) return;
     const command = `dism /online /export-driver /destination:"${backupPath}"`;
     window.electronAPI.runCommand(command, "در حال پشتیبان‌گیری از تمام درایورهای نصب شده");
   };
@@ -347,32 +394,7 @@ const App: React.FC = () => {
   const handleCreateRestorePoint = async () => {
     if (isBusy) return;
     const command = `powershell -Command "Checkpoint-Computer -Description 'DriverDolphin Pre-Restore Point' -RestorePointType 'MODIFY_SETTINGS'"`;
-    
-    setIsBusy(true);
-    setCurrentOperation("در حال ایجاد یک نقطه بازیابی سیستم جدید");
-    addLog('START', "Attempting to create a system restore point.");
-
-    const { stdout, stderr, code } = await window.electronAPI.runCommandAndGetOutput(command);
-
-    if (stderr) addLog('OUTPUT', `ERROR: ${stderr}`);
-    if (stdout) addLog('OUTPUT', stdout);
-    
-    const warningMessage = "one has already been created within the past 1440 minutes";
-    if (stdout.includes(warningMessage) || stderr.includes(warningMessage)) {
-        const uiMessage = "یک نقطه بازیابی به تازگی ایجاد شده است. ویندوز اجازه ایجاد نقطه جدید را نمی‌دهد.";
-        addLog('WARN', "A new system restore point cannot be created because one was created within the last 24 hours.");
-        addNotification('warning', 'نقطه بازیابی', uiMessage);
-        addLog('END_SUCCESS', `Process finished with exit code ${code} (with warning).`);
-    } else if (code === 0) {
-       addLog('END_SUCCESS', `Process finished with exit code ${code}.`);
-       addNotification('success', 'موفقیت', 'نقطه بازیابی سیستم با موفقیت ایجاد شد.');
-    } else {
-       addLog('END_ERROR', `Process finished with exit code ${code}.`);
-       addNotification('error', 'خطا', 'ایجاد نقطه بازیابی با خطا مواجه شد. به لاگ‌ها مراجعه کنید.');
-    }
-
-    setIsBusy(false);
-    setCurrentOperation('');
+    window.electronAPI.runCommand(command, "در حال ایجاد یک نقطه بازیابی سیستم جدید");
   };
   
   const handleFullRestore = () => {
@@ -405,14 +427,9 @@ const App: React.FC = () => {
     if (stdout && stdout.trim()) {
         try {
             const result = JSON.parse(stdout.trim());
-            // Ensure result is an array, as PowerShell's ConvertTo-Json might return a single object if only one driver is found.
             parsedDrivers = Array.isArray(result) ? result : (result ? [result] : []);
             setDrivers(parsedDrivers);
-            if (parsedDrivers.length > 0) {
-                addLog('INFO', `${parsedDrivers.length} drivers found and processed.`);
-            } else {
-                 addLog('INFO', `Scan complete, no drivers found.`);
-            }
+            addLog('INFO', `${parsedDrivers.length} drivers found and processed.`);
         } catch (e: any) {
             addLog('END_ERROR', `Failed to parse driver scan output: ${e.message}`);
             success = false;
@@ -445,22 +462,38 @@ const App: React.FC = () => {
     });
   };
 
+  const filteredDrivers = useMemo(() => {
+    if (!selectiveBackupSearch) return drivers;
+    const lowercasedFilter = selectiveBackupSearch.toLowerCase();
+    return drivers.filter(driver => 
+        driver.provider.toLowerCase().includes(lowercasedFilter) ||
+        driver.className.toLowerCase().includes(lowercasedFilter) ||
+        driver.originalName.toLowerCase().includes(lowercasedFilter) ||
+        driver.version.toLowerCase().includes(lowercasedFilter)
+    );
+  }, [drivers, selectiveBackupSearch]);
+
   const handleToggleSelectAll = () => {
-    if (selectedDrivers.size === drivers.length) {
-      setSelectedDrivers(new Set());
-    } else {
-      const allDriverNames = drivers.map(d => d.publishedName);
-      setSelectedDrivers(new Set(allDriverNames));
-    }
+    const allFilteredSelected = filteredDrivers.length > 0 && filteredDrivers.every(d => selectedDrivers.has(d.publishedName));
+    setSelectedDrivers(prev => {
+        const newSet = new Set(prev);
+        if (allFilteredSelected) {
+            filteredDrivers.forEach(d => newSet.delete(d.publishedName));
+        } else {
+            filteredDrivers.forEach(d => newSet.add(d.publishedName));
+        }
+        return newSet;
+    });
   };
   
-  const handleSelectiveBackup = () => {
+  const handleSelectiveBackup = async () => {
       if(selectedDrivers.size === 0 || !selectiveBackupPath || isBusy) return;
+      if (!(await confirmNonEmptyFolder(selectiveBackupPath))) return;
+
       const selectedDriverInfo = drivers.filter(d => selectedDrivers.has(d.publishedName));
       const fileRepoPath = `${windowsPath}\\System32\\DriverStore\\FileRepository`;
       const infNames = selectedDriverInfo.map(d => d.originalName.replace('.inf', ''));
       
-      addLog('INFO', `Checking if selective backup destination is empty: ${selectiveBackupPath}`);
       const whereClauses = infNames.map(n => `($_.Name -like '${n}*')`).join(' -or ');
       const command = `Get-ChildItem -Path '${fileRepoPath}' -Recurse -Directory | Where-Object { ${whereClauses} } | Copy-Item -Destination '${selectiveBackupPath}' -Recurse -Container -Force`;
       
@@ -485,16 +518,28 @@ const App: React.FC = () => {
         return newSet;
     });
   };
+
+  const filteredDriversFromBackup = useMemo(() => {
+    if (!selectiveRestoreSearch) return driversFromBackup;
+    const lowercasedFilter = selectiveRestoreSearch.toLowerCase();
+    return driversFromBackup.filter(driver =>
+        driver.displayName.toLowerCase().includes(lowercasedFilter) ||
+        driver.infName.toLowerCase().includes(lowercasedFilter)
+    );
+  }, [driversFromBackup, selectiveRestoreSearch]);
   
   const handleToggleSelectAllBackupDrivers = () => {
-      if (selectedDriversFromBackup.size === driversFromBackup.length) {
-          setSelectedDriversFromBackup(new Set());
-      } else {
-          const allDriverPaths = driversFromBackup.map(d => d.fullInfPath);
-          setSelectedDriversFromBackup(new Set(allDriverPaths));
-      }
+      const allFilteredSelected = filteredDriversFromBackup.length > 0 && filteredDriversFromBackup.every(d => selectedDriversFromBackup.has(d.fullInfPath));
+      setSelectedDriversFromBackup(prev => {
+          const newSet = new Set(prev);
+          if (allFilteredSelected) {
+              filteredDriversFromBackup.forEach(d => newSet.delete(d.fullInfPath));
+          } else {
+              filteredDriversFromBackup.forEach(d => newSet.add(d.fullInfPath));
+          }
+          return newSet;
+      });
   };
-
 
   const tabs = [
     { id: 'full-backup', icon: 'fa-hdd', label: 'پشتیبان‌گیری کامل' },
@@ -534,7 +579,7 @@ const App: React.FC = () => {
             <p className="text-gray-400 mb-6">از تمام درایورهای نصب شده (غیر پیش‌فرض ویندوز) در یک پوشه پشتیبان تهیه کنید تا بتوانید بعداً آن‌ها را بازیابی کنید.</p>
             <div className="flex items-center space-x-reverse space-x-2 mb-6">
                 <input type="text" readOnly value={backupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
-                <button onClick={() => handleSelectFolder(setPersistedBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder-open"></i></button>
+                <button onClick={() => handleSelectFolder(setPersistedBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0" title="انتخاب پوشه"><i className="fas fa-folder-open"></i></button>
             </div>
             <div className="mt-auto flex justify-start">
               <button onClick={handleFullBackup} disabled={!backupPath || isBusy} className="btn-primary w-64">
@@ -560,7 +605,7 @@ const App: React.FC = () => {
 
             <div className="flex items-center space-x-reverse space-x-2 mb-6">
                 <input type="text" readOnly value={restorePath} placeholder="پوشه پشتیبان را انتخاب کنید..." className="form-input-custom" />
-                <button onClick={() => handleSelectFolder(setPersistedRestorePath)} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder"></i></button>
+                <button onClick={() => handleSelectFolder(setPersistedRestorePath)} disabled={isBusy} className="btn-secondary flex-shrink-0" title="انتخاب پوشه"><i className="fas fa-folder"></i></button>
             </div>
             <div className="mt-auto flex justify-start">
               <button onClick={handleFullRestore} disabled={!restorePath || isBusy} className="btn-primary w-64">
@@ -572,26 +617,34 @@ const App: React.FC = () => {
       case 'selective-backup':
         return (
           <div className="flex flex-col h-full">
-            <h2 className="text-2xl font-bold mb-4 text-gray-200">پشتیبان‌گیری انتخابی</h2>
-            <p className="text-gray-400 mb-2">درایورهای نصب شده روی سیستم را اسکن کرده و موارد دلخواه را برای پشتیبان‌گیری انتخاب کنید.</p>
-            <div className="mb-4">
-              <button onClick={handleScanDrivers} disabled={isBusy} className="btn-secondary w-64">
-                  <i className="fas fa-search mr-2"></i> اسکن تمام درایورها
-              </button>
+            <div className="flex-shrink-0">
+                <h2 className="text-2xl font-bold mb-4 text-gray-200">پشتیبان‌گیری انتخابی</h2>
+                <p className="text-gray-400 mb-2">درایورهای نصب شده روی سیستم را اسکن کرده و موارد دلخواه را برای پشتیبان‌گیری انتخاب کنید.</p>
+                <div className="mb-4">
+                  <button onClick={handleScanDrivers} disabled={isBusy} className="btn-secondary w-64">
+                      <i className="fas fa-search mr-2"></i> اسکن تمام درایورها
+                  </button>
+                </div>
+                <div className="relative mb-2">
+                    <i className="fas fa-search absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"></i>
+                    <input type="text" value={selectiveBackupSearch} onChange={e => setSelectiveBackupSearch(e.target.value)} placeholder="جستجوی درایور..." className="form-input-custom pr-10" />
+                </div>
+                 <div className="flex items-center mb-2 text-sm text-gray-300">
+                    <input 
+                        type="checkbox" 
+                        id="select-all-drivers"
+                        checked={filteredDrivers.length > 0 && filteredDrivers.every(d => selectedDrivers.has(d.publishedName))}
+                        onChange={handleToggleSelectAll}
+                        disabled={filteredDrivers.length === 0 || isBusy}
+                    />
+                    <label htmlFor="select-all-drivers" className="pr-2 cursor-pointer">انتخاب همه موارد نمایش داده شده</label>
+                    <span className="pr-4 mr-auto text-gray-400">نمایش {filteredDrivers.length} از {drivers.length} درایور</span>
+                </div>
             </div>
-             <div className="flex items-center mb-2">
-                <input 
-                    type="checkbox" 
-                    id="select-all-drivers"
-                    checked={drivers.length > 0 && selectedDrivers.size === drivers.length}
-                    onChange={handleToggleSelectAll}
-                    disabled={drivers.length === 0 || isBusy}
-                />
-                <label htmlFor="select-all-drivers" className="pr-2 text-sm text-gray-300 cursor-pointer">انتخاب / عدم انتخاب همه</label>
-            </div>
-            <div dir="ltr" className="flex-grow overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md mb-4 p-2">
+            <div dir="ltr" className="flex-grow overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md p-2">
+                {drivers.length > 0 && filteredDrivers.length === 0 && <p className="text-gray-500 text-center p-4">هیچ درایوری با عبارت جستجو شده مطابقت ندارد.</p>}
                 {drivers.length === 0 && <p className="text-gray-500 text-center p-4">برای مشاهده لیست، سیستم را اسکن کنید.</p>}
-                {drivers.map(driver => (
+                {filteredDrivers.map(driver => (
                     <div key={driver.publishedName} className="flex items-center p-2 rounded hover:bg-white/5 transition-colors">
                         <input type="checkbox" id={driver.publishedName} checked={selectedDrivers.has(driver.publishedName)} onChange={() => toggleDriverSelection(driver.publishedName)} />
                         <label htmlFor={driver.publishedName} className="flex-grow cursor-pointer text-sm pl-3">
@@ -601,52 +654,59 @@ const App: React.FC = () => {
                     </div>
                 ))}
             </div>
-             <div className="flex items-center space-x-reverse space-x-2 mb-4">
-                <input type="text" readOnly value={selectiveBackupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
-                <button onClick={() => handleSelectFolder(setPersistedSelectiveBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder-open"></i></button>
-            </div>
-            <div className="flex justify-start">
-              <button onClick={handleSelectiveBackup} disabled={selectedDrivers.size === 0 || !selectiveBackupPath || isBusy} className="btn-primary w-64">
-                  <i className="fas fa-download mr-2"></i> پشتیبان‌گیری از {selectedDrivers.size} درایور
-              </button>
+            <div className="flex-shrink-0 mt-4">
+                 <div className="flex items-center space-x-reverse space-x-2 mb-4">
+                    <input type="text" readOnly value={selectiveBackupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
+                    <button onClick={() => handleSelectFolder(setPersistedSelectiveBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0" title="انتخاب پوشه"><i className="fas fa-folder-open"></i></button>
+                </div>
+                <div className="flex justify-start">
+                  <button onClick={handleSelectiveBackup} disabled={selectedDrivers.size === 0 || !selectiveBackupPath || isBusy} className="btn-primary w-64">
+                      <i className="fas fa-download mr-2"></i> پشتیبان‌گیری از {selectedDrivers.size} درایور
+                  </button>
+                </div>
             </div>
           </div>
         );
       case 'selective-restore':
          return (
           <div className="flex flex-col h-full">
-            <h2 className="text-2xl font-bold mb-4 text-gray-200">بازیابی انتخابی از پوشه</h2>
-            <p className="text-gray-400 mb-2">یک پوشه پشتیبان را انتخاب کرده و درایورهای مورد نظر برای نصب را مشخص کنید.</p>
-            
-            <div className="mb-4">
-               <button onClick={handleCreateRestorePoint} disabled={isBusy || !isSystemRestoreEnabled} className="btn-info w-64">
-                  <i className="fas fa-shield-alt mr-2"></i> ایجاد نقطه بازیابی
-              </button>
+            <div className="flex-shrink-0">
+                <h2 className="text-2xl font-bold mb-4 text-gray-200">بازیابی انتخابی از پوشه</h2>
+                <p className="text-gray-400 mb-2">یک پوشه پشتیبان را انتخاب کرده و درایورهای مورد نظر برای نصب را مشخص کنید.</p>
+                <div className="mb-4">
+                   <button onClick={handleCreateRestorePoint} disabled={isBusy || !isSystemRestoreEnabled} className="btn-info w-64">
+                      <i className="fas fa-shield-alt mr-2"></i> ایجاد نقطه بازیابی
+                  </button>
+                </div>
+                <div className="flex items-center space-x-reverse space-x-2 mb-4">
+                    <input type="text" readOnly value={selectiveRestoreFolder} placeholder="پوشه پشتیبان را انتخاب و اسکن کنید..." className="form-input-custom" />
+                    <button onClick={async () => {
+                        await handleSelectFolder((path) => {
+                            setPersistedSelectiveRestoreFolder(path);
+                            scanBackupFolder(path);
+                        });
+                    }} disabled={isBusy} className="btn-secondary flex-shrink-0" title="انتخاب و اسکن پوشه"><i className="fas fa-folder-search"></i></button>
+                </div>
+                <div className="relative mb-2">
+                    <i className="fas fa-search absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"></i>
+                    <input type="text" value={selectiveRestoreSearch} onChange={e => setSelectiveRestoreSearch(e.target.value)} placeholder="جستجوی درایور در پشتیبان..." className="form-input-custom pr-10" />
+                </div>
+                <div className="flex items-center mb-2 text-sm text-gray-300">
+                    <input 
+                        type="checkbox" 
+                        id="select-all-backup-drivers"
+                        checked={filteredDriversFromBackup.length > 0 && filteredDriversFromBackup.every(d => selectedDriversFromBackup.has(d.fullInfPath))}
+                        onChange={handleToggleSelectAllBackupDrivers}
+                        disabled={filteredDriversFromBackup.length === 0 || isBusy}
+                    />
+                    <label htmlFor="select-all-backup-drivers" className="pr-2 cursor-pointer">انتخاب همه موارد نمایش داده شده</label>
+                    <span className="pr-4 mr-auto text-gray-400">نمایش {filteredDriversFromBackup.length} از {driversFromBackup.length} درایور</span>
+                </div>
             </div>
-            
-            <div className="flex items-center space-x-reverse space-x-2 mb-4">
-                <input type="text" readOnly value={selectiveRestoreFolder} placeholder="پوشه پشتیبان را انتخاب کنید..." className="form-input-custom" />
-                <button onClick={async () => {
-                    await handleSelectFolder((path) => {
-                        setPersistedSelectiveRestoreFolder(path);
-                        scanBackupFolder(path);
-                    });
-                }} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder"></i></button>
-            </div>
-
-            <div className="flex items-center mb-2">
-                <input 
-                    type="checkbox" 
-                    id="select-all-backup-drivers"
-                    checked={driversFromBackup.length > 0 && selectedDriversFromBackup.size === driversFromBackup.length}
-                    onChange={handleToggleSelectAllBackupDrivers}
-                    disabled={driversFromBackup.length === 0 || isBusy}
-                />
-                <label htmlFor="select-all-backup-drivers" className="pr-2 text-sm text-gray-300 cursor-pointer">انتخاب / عدم انتخاب همه</label>
-            </div>
-            <div dir="ltr" className="flex-grow overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md mb-4 p-2">
+            <div dir="ltr" className="flex-grow overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md p-2">
+                {driversFromBackup.length > 0 && filteredDriversFromBackup.length === 0 && <p className="text-gray-500 text-center p-4">هیچ درایوری با عبارت جستجو شده مطابقت ندارد.</p>}
                 {driversFromBackup.length === 0 && <p className="text-gray-500 text-center p-4">یک پوشه پشتیبان را برای اسکن انتخاب کنید.</p>}
-                {driversFromBackup.map(driver => (
+                {filteredDriversFromBackup.map(driver => (
                     <div key={driver.id} className="flex items-center p-2 rounded hover:bg-white/5 transition-colors">
                         <input type="checkbox" id={driver.id} checked={selectedDriversFromBackup.has(driver.fullInfPath)} onChange={() => toggleBackupDriverSelection(driver.fullInfPath)} />
                         <label htmlFor={driver.id} className="flex-grow cursor-pointer text-sm pl-3 font-mono">
@@ -656,8 +716,7 @@ const App: React.FC = () => {
                     </div>
                 ))}
             </div>
-
-            <div className="mt-auto flex justify-start">
+            <div className="mt-auto flex justify-start pt-4 flex-shrink-0">
               <button onClick={handleSelectiveRestore} disabled={selectedDriversFromBackup.size === 0 || isBusy} className="btn-primary w-64">
                   <i className="fas fa-play mr-2"></i> نصب {selectedDriversFromBackup.size} درایور
               </button>
@@ -670,8 +729,8 @@ const App: React.FC = () => {
             <h2 className="text-2xl font-bold mb-4 text-gray-200">لاگ‌های برنامه</h2>
              <div className="flex items-center gap-2 mb-4">
                 <input type="text" value={logFilter} onChange={e => setLogFilter(e.target.value)} placeholder="فیلتر لاگ‌ها..." className="form-input-custom flex-grow" />
-                <button onClick={() => navigator.clipboard.writeText(logs.map(l => `[${l.timestamp}] [${l.type}] ${l.message}`).join('\n'))} className="btn-secondary" aria-label="Copy Logs"><i className="fas fa-copy"></i></button>
-                <button onClick={() => setLogs([])} className="btn-secondary" aria-label="Clear Logs"><i className="fas fa-trash"></i></button>
+                <button onClick={() => navigator.clipboard.writeText(logs.map(l => `[${l.timestamp}] [${l.type}] ${l.message}`).join('\n'))} className="btn-secondary" title="کپی کردن لاگ‌ها"><i className="fas fa-copy"></i></button>
+                <button onClick={() => setLogs([])} className="btn-secondary" title="پاک کردن لاگ‌ها"><i className="fas fa-trash"></i></button>
             </div>
             <div ref={logContainerRef} dir="ltr" className="flex-grow bg-gray-900/80 rounded-lg ring-1 ring-white/10 p-4 font-mono text-xs overflow-y-auto whitespace-pre-wrap">
                 {filteredLogs.map(log => (
@@ -745,12 +804,16 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-black flex flex-col">
-      <TitleBar isMaximized={isMaximized} />
+      {showAboutModal && <AboutModal onClose={() => setShowAboutModal(false)} />}
+      <TitleBar isMaximized={isMaximized} onAboutClick={() => setShowAboutModal(true)} />
       <NotificationContainer notifications={notifications} onDismiss={removeNotification} />
       <div className="pt-8 flex-grow" style={{minHeight: 0}}>
         {isAdmin === null && (
             <div className="flex-grow flex items-center justify-center h-full">
-                <p className="text-gray-400">در حال بررسی دسترسی‌ها...</p>
+                <div className="flex flex-col items-center">
+                    <i className="fas fa-spinner fa-spin text-3xl text-gray-400"></i>
+                    <p className="text-gray-400 mt-3">در حال بررسی دسترسی‌ها...</p>
+                </div>
             </div>
         )}
         {isAdmin === false && renderAdminGate()}

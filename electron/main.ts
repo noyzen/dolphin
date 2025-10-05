@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, session, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, globalShortcut, session, ipcMain, dialog, MessageBoxOptions } from 'electron';
 import path from 'path';
 import Store from 'electron-store';
 import { exec } from 'child_process';
@@ -226,6 +226,28 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
     console.error('Failed to scan backup folder:', error);
     return []; // Return empty array on error
   }
+});
+
+// Check if a folder is empty
+ipcMain.handle('is-folder-empty', async (_, folderPath: string) => {
+  try {
+    await fs.access(folderPath); // Check if it exists
+    const files = await fs.readdir(folderPath);
+    return files.length === 0;
+  } catch (error: any) {
+    if (error.code === 'ENOENT') {
+      return true; // Doesn't exist, so it's "empty" for our purpose
+    }
+    console.error(`Error checking if folder is empty (${folderPath}):`, error);
+    return false; // On other errors, assume not empty to be safe
+  }
+});
+
+// Show a confirmation dialog
+ipcMain.handle('show-confirmation-dialog', async (event, options: MessageBoxOptions) => {
+  if (!mainWindow) return options.cancelId ?? 1; // Default to cancel if no window
+  const { response } = await dialog.showMessageBox(mainWindow, options);
+  return response;
 });
 
 

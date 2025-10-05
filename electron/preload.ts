@@ -25,8 +25,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setSetting: (key: string, value: any) => ipcRenderer.send('set-setting', { key, value }),
   validatePath: (path: string): Promise<boolean> => ipcRenderer.invoke('validate-path', path),
 
-  // New selective restore helper
+  // Selective restore and backup helpers
   scanBackupFolder: (folderPath: string): Promise<any[]> => ipcRenderer.invoke('scan-backup-folder', folderPath),
+  isFolderEmpty: (folderPath: string): Promise<boolean> => ipcRenderer.invoke('is-folder-empty', folderPath),
+  showConfirmationDialog: (options: any): Promise<number> => ipcRenderer.invoke('show-confirmation-dialog', options),
 
 
   // Command output listeners

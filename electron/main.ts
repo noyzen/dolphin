@@ -1,7 +1,7 @@
 import { app, BrowserWindow, globalShortcut, session, ipcMain, dialog, MessageBoxOptions } from 'electron';
 import path from 'path';
 import Store from 'electron-store';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import os from 'os';
 import fs from 'fs/promises';
 
@@ -205,14 +205,12 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
         errors.push(msg);
     };
 
-    let tempScriptPath = '';
-
     try {
-        // The script now accepts the root path as a parameter. This avoids command length limits.
+        // Escape single quotes for PowerShell and embed the path directly in the script.
+        const escapedFolderPath = folderPath.replace(/'/g, "''");
+
         const scriptContent = `
-            param(
-                [string]$RootPath
-            )
+            $RootPath = '${escapedFolderPath}'
             
             try {
                 $infFiles = Get-ChildItem -Path $RootPath -Recurse -Filter *.inf -ErrorAction Stop;
@@ -295,18 +293,28 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
             $allDrivers | ConvertTo-Json -Compress
         `;
 
-        // Create a temporary file to hold the script
-        tempScriptPath = path.join(os.tmpdir(), `driver-dolphin-scan-${Date.now()}.ps1`);
-        await fs.writeFile(tempScriptPath, scriptContent, { encoding: 'utf8' });
-
-        // Execute the script from the temporary file, passing the folder path as an argument.
-        // Enclosing paths in double quotes is crucial for paths with spaces.
-        const command = `powershell -NoProfile -ExecutionPolicy Bypass -File "${tempScriptPath}" -RootPath "${folderPath}"`;
+        // Use spawn and pipe the script to stdin to avoid command length limits and temp file issues.
+        const ps = spawn('powershell.exe', [
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-Command', '-' // Read from stdin
+        ]);
 
         return new Promise((resolve) => {
-            exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
-                if (error) {
-                    const errorMsg = stderr ? `Stderr: ${stderr}` : `Error: ${error.message}`;
+            let stdout = '';
+            let stderr = '';
+
+            ps.stdout.on('data', (data) => {
+                stdout += data.toString();
+            });
+
+            ps.stderr.on('data', (data) => {
+                stderr += data.toString();
+            });
+
+            ps.on('close', (code) => {
+                if (code !== 0) {
+                    const errorMsg = stderr ? `Stderr: ${stderr}` : `Exit code: ${code}`;
                     logError(`PowerShell execution failed. ${errorMsg}`);
                     resolve({ drivers: [], errors });
                     return;
@@ -346,21 +354,13 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                     resolve({ drivers: [], errors });
                 }
             });
-        });
 
+            ps.stdin.write(scriptContent);
+            ps.stdin.end();
+        });
     } catch (error: any) {
         logError(`An unexpected error occurred in scan-backup-folder: ${error.message}`);
         return { drivers: [], errors };
-    } finally {
-        // Clean up the temporary script file
-        if (tempScriptPath) {
-            try {
-                await fs.unlink(tempScriptPath);
-            } catch (cleanupError: any) {
-                // Log cleanup error but don't throw, as the main operation result is more important.
-                console.error(`Failed to clean up temporary script file: ${tempScriptPath}`, cleanupError);
-            }
-        }
     }
 });
 

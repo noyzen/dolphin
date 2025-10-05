@@ -13,6 +13,7 @@ interface DriverInfo {
   originalName: string;
   provider: string;
   className: string;
+  version: string;
 }
 
 interface DriverFromBackup {
@@ -340,7 +341,7 @@ const App: React.FC = () => {
     addLog('INFO', `Checking if backup destination is empty: ${backupPath}`);
     // Note: Overwrite detection can be added here by checking if folder is empty
     const command = `dism /online /export-driver /destination:"${backupPath}"`;
-    window.electronAPI.runCommand(command, "در حال خروجی گرفتن از تمام درایورهای شخص ثالث");
+    window.electronAPI.runCommand(command, "در حال پشتیبان‌گیری از تمام درایورهای نصب شده");
   };
 
   const handleCreateRestorePoint = async () => {
@@ -383,14 +384,14 @@ const App: React.FC = () => {
 
   const handleScanDrivers = async () => {
     if (isBusy) return;
-    const command = `powershell -NoProfile -ExecutionPolicy Bypass -Command "@(Get-WindowsDriver -Online | Where-Object { !$_.Inbox } | Select-Object @{n='publishedName';e={$_.Driver}}, @{n='originalName';e={$_.OriginalFileName}}, @{n='provider';e={$_.ProviderName}}, @{n='className';e={$_.ClassName}}) | ConvertTo-Json"`;
+    const command = `powershell -NoProfile -ExecutionPolicy Bypass -Command "@(Get-WindowsDriver -Online | Select-Object @{n='publishedName';e={$_.Driver}}, @{n='originalName';e={$_.OriginalFileName}}, @{n='provider';e={$_.ProviderName}}, @{n='className';e={$_.ClassName}}, @{n='version';e={$_.DriverVersion}}) | ConvertTo-Json"`;
 
     setDrivers([]);
     setSelectedDrivers(new Set());
     
     setIsBusy(true);
-    setCurrentOperation("در حال اسکن برای یافتن تمام درایورهای شخص ثالث");
-    addLog('START', "Scanning system for third-party drivers.");
+    setCurrentOperation("در حال اسکن درایورهای نصب شده سیستم");
+    addLog('START', "Scanning system for installed drivers.");
 
     const { stdout, stderr, code } = await window.electronAPI.runCommandAndGetOutput(command);
     
@@ -410,20 +411,20 @@ const App: React.FC = () => {
             if (parsedDrivers.length > 0) {
                 addLog('INFO', `${parsedDrivers.length} drivers found and processed.`);
             } else {
-                 addLog('INFO', `Scan complete, no third-party drivers found.`);
+                 addLog('INFO', `Scan complete, no drivers found.`);
             }
         } catch (e: any) {
             addLog('END_ERROR', `Failed to parse driver scan output: ${e.message}`);
             success = false;
         }
     } else {
-      addLog('INFO', `Scan complete, no third-party drivers found.`);
+      addLog('INFO', `Scan complete, no drivers found.`);
     }
     
     addLog(success ? 'END_SUCCESS' : 'END_ERROR', `Scan process finished with exit code ${code}.`);
     
     if (success) {
-      addNotification('success', 'اسکن کامل شد', `تعداد ${parsedDrivers.length} درایور شخص ثالث یافت شد.`);
+      addNotification('success', 'اسکن کامل شد', `تعداد ${parsedDrivers.length} درایور یافت شد.`);
     } else {
       addNotification('error', 'خطای اسکن', 'اسکن درایورهای سیستم با خطا مواجه شد.');
     }
@@ -529,8 +530,8 @@ const App: React.FC = () => {
       case 'full-backup':
         return (
           <div className="flex flex-col h-full">
-            <h2 className="text-2xl font-bold mb-4 text-gray-200">پشتیبان‌گیری از تمام درایورها</h2>
-            <p className="text-gray-400 mb-6">تمام درایورهای شخص ثالث (third-party) را در یک پوشه ذخیره کنید.</p>
+            <h2 className="text-2xl font-bold mb-4 text-gray-200">پشتیبان‌گیری کامل از درایورها</h2>
+            <p className="text-gray-400 mb-6">از تمام درایورهای نصب شده (غیر پیش‌فرض ویندوز) در یک پوشه پشتیبان تهیه کنید تا بتوانید بعداً آن‌ها را بازیابی کنید.</p>
             <div className="flex items-center space-x-reverse space-x-2 mb-6">
                 <input type="text" readOnly value={backupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
                 <button onClick={() => handleSelectFolder(setPersistedBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder-open"></i></button>
@@ -545,8 +546,8 @@ const App: React.FC = () => {
       case 'full-restore':
          return (
           <div className="flex flex-col h-full">
-            <h2 className="text-2xl font-bold mb-4 text-gray-200">بازیابی تمام درایورها</h2>
-            <p className="text-gray-400 mb-6">درایورها را از یک پوشه پشتیبان نصب کنید. توصیه می‌شود ابتدا یک نقطه بازیابی سیستم (Restore Point) ایجاد کنید.</p>
+            <h2 className="text-2xl font-bold mb-4 text-gray-200">بازیابی کامل درایورها</h2>
+            <p className="text-gray-400 mb-6">تمام درایورهای موجود در پوشه پشتیبان را نصب کنید. این کار برای بازیابی درایورها روی یک ویندوز جدید یا همین سیستم مناسب است. برای اطمینان، ابتدا یک نقطه بازیابی سیستم ایجاد کنید.</p>
             
             <div className="mb-6 space-y-4">
               <p className="text-gray-400 text-sm">
@@ -572,10 +573,10 @@ const App: React.FC = () => {
         return (
           <div className="flex flex-col h-full">
             <h2 className="text-2xl font-bold mb-4 text-gray-200">پشتیبان‌گیری انتخابی</h2>
-            <p className="text-gray-400 mb-2">درایورهای مورد نظر خود را برای پشتیبان‌گیری انتخاب کنید.</p>
+            <p className="text-gray-400 mb-2">درایورهای نصب شده روی سیستم را اسکن کرده و موارد دلخواه را برای پشتیبان‌گیری انتخاب کنید.</p>
             <div className="mb-4">
               <button onClick={handleScanDrivers} disabled={isBusy} className="btn-secondary w-64">
-                  <i className="fas fa-search mr-2"></i> اسکن درایورهای سیستم
+                  <i className="fas fa-search mr-2"></i> اسکن تمام درایورها
               </button>
             </div>
              <div className="flex items-center mb-2">
@@ -594,7 +595,8 @@ const App: React.FC = () => {
                     <div key={driver.publishedName} className="flex items-center p-2 rounded hover:bg-white/5 transition-colors">
                         <input type="checkbox" id={driver.publishedName} checked={selectedDrivers.has(driver.publishedName)} onChange={() => toggleDriverSelection(driver.publishedName)} />
                         <label htmlFor={driver.publishedName} className="flex-grow cursor-pointer text-sm pl-3">
-                            <span className="font-bold text-gray-200">{driver.provider}</span> - <span className="text-gray-400">{driver.className} ({driver.originalName})</span>
+                            <span className="font-bold text-gray-200 block">{driver.provider} - {driver.className}</span>
+                            <span className="text-gray-400 text-xs block">Version: {driver.version} ({driver.originalName})</span>
                         </label>
                     </div>
                 ))}

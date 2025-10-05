@@ -221,7 +221,10 @@ async function findInfFiles(dir: string): Promise<string[]> {
 ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
   try {
     const infFiles = await findInfFiles(folderPath);
-    if (infFiles.length === 0) return [];
+    if (infFiles.length === 0) {
+      console.log(`Scan complete: No .inf files found in ${folderPath}`);
+      return [];
+    }
     
     // Sanitize paths for PowerShell and create a comma-separated list of strings
     const sanitizedInfPaths = infFiles.map(f => `'${f.replace(/'/g, "''")}'`).join(',');
@@ -283,15 +286,19 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
                 }
 
             } catch {
-                # Silently ignore .inf files that cannot be processed
+                # Silently ignore .inf files that cannot be processed to prevent one bad file from failing the whole scan.
             }
         }
         $allDrivers | ConvertTo-Json -Compress
     `;
 
+    // Encode the command to prevent shell interpretation issues with quotes and newlines.
+    // This is the most reliable way to execute complex scripts.
+    const encodedCommand = Buffer.from(command, 'utf16le').toString('base64');
+
     return new Promise((resolve) => {
-      // Use exec directly to handle PowerShell command
-      exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${command}"`, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+      // Use EncodedCommand for reliable execution.
+      exec(`powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encodedCommand}`, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
           if (error) {
               console.error('Error scanning backup folder with PowerShell:', stderr);
               resolve([]);
@@ -303,17 +310,18 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string) => {
                   return;
               }
               const drivers = JSON.parse(stdout);
-              const driverArray = Array.isArray(drivers) ? drivers : [drivers];
+              // Handle cases where PowerShell returns a single object instead of an array
+              const driverArray = Array.isArray(drivers) ? drivers : (drivers ? [drivers] : []);
               
               const result = driverArray.map((d, index) => ({
                   ...d,
-                  id: `${d.fullInfPath}-${d.originalName}-${index}`,
+                  id: `${d.fullInfPath}-${d.originalName}-${index}`, // Ensure unique ID
                   displayName: `${d.provider || 'Unknown'} - ${d.className || d.originalName}`,
                   infName: d.originalName,
               }));
               resolve(result);
           } catch (e) {
-              console.error('Error parsing driver info JSON from backup scan:', e, 'Output:', stdout);
+              console.error('Error parsing driver info JSON from backup scan:', e, 'Raw Output:', stdout);
               resolve([]);
           }
       });

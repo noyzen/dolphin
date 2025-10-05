@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { OpenDialogOptions } from 'electron';
 
 declare module 'react' {
@@ -7,13 +7,22 @@ declare module 'react' {
   }
 }
 
-// Type definitions for parsed driver information
+// Type definitions
 interface DriverInfo {
   publishedName: string;
   originalName: string;
   provider: string;
   className: string;
 }
+
+type LogType = 'START' | 'OUTPUT' | 'END_SUCCESS' | 'END_ERROR' | 'INFO' | 'WARN';
+interface LogEntry {
+  id: number;
+  timestamp: string;
+  type: LogType;
+  message: string;
+}
+
 
 declare global {
   interface Window {
@@ -33,6 +42,8 @@ declare global {
     };
   }
 }
+
+let logIdCounter = 0;
 
 const TitleBar: React.FC<{ isMaximized: boolean }> = ({ isMaximized }) => {
   return (
@@ -74,20 +85,52 @@ const TitleBar: React.FC<{ isMaximized: boolean }> = ({ isMaximized }) => {
   );
 };
 
+const AdminGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    const [isAdmin, setIsAdmin] = useState(true);
+
+    useEffect(() => {
+        window.electronAPI.checkAdmin().then(setIsAdmin);
+    }, []);
+
+    if (!isAdmin) {
+        return (
+            <div className="h-screen w-screen bg-black flex flex-col items-center justify-center text-center p-8">
+                <div className="bg-gray-800/50 ring-1 ring-red-500/30 rounded-lg p-10 max-w-lg">
+                    <i className="fas fa-user-shield text-5xl text-red-400 mb-6"></i>
+                    <h1 className="text-3xl font-bold text-red-300 mb-4">Administrator Access Required</h1>
+                    <p className="text-gray-300 mb-8">Driver Dolphin needs to be run as an administrator to manage system drivers. Please restart the application with the correct permissions.</p>
+                    <div className="text-left bg-gray-900/70 p-6 rounded-md ring-1 ring-white/10">
+                        <h2 className="font-bold text-lg text-gray-100 mb-4">How to run as administrator:</h2>
+                        <ol className="list-decimal list-inside space-y-3 text-gray-300">
+                            <li>Close this window.</li>
+                            <li>Find the <strong className="text-green-400">Driver Dolphin</strong> application file or shortcut.</li>
+                            <li><strong className="text-green-400">Right-click</strong> on the icon.</li>
+                            <li>Select <strong className="text-green-400">"Run as administrator"</strong> from the menu.</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    return <>{children}</>;
+};
+
 const App: React.FC = () => {
   const [isMaximized, setIsMaximized] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(true);
   const [activeTab, setActiveTab] = useState('full-backup');
-  const [log, setLog] = useState<string>('Welcome to Driver Dolphin!\nReady to start...');
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isBusy, setIsBusy] = useState(false);
-  
+  const [statusMessage, setStatusMessage] = useState('Welcome to Driver Dolphin! Ready to start...');
+  const [logFilter, setLogFilter] = useState('');
+
   // Paths
   const [backupPath, setBackupPath] = useState('');
   const [restorePath, setRestorePath] = useState('');
   const [selectiveBackupPath, setSelectiveBackupPath] = useState('');
   
   // System state
-  const [isSystemRestoreEnabled, setIsSystemRestoreEnabled] = useState(false);
+  const [isSystemRestoreEnabled, setIsSystemRestoreEnabled] = useState<boolean | null>(null);
 
   // Selective Backup
   const [drivers, setDrivers] = useState<DriverInfo[]>([]);
@@ -96,38 +139,48 @@ const App: React.FC = () => {
   
   // Selective Restore
   const [selectiveRestoreFiles, setSelectiveRestoreFiles] = useState<string[]>([]);
+  
+  const statusTimerRef = useRef<number | null>(null);
 
-  const logRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    // Scroll log to bottom
-    if (logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
-  }, [log]);
+  const addLog = (type: LogType, message: string) => {
+    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+    setLogs(prev => [...prev, { id: logIdCounter++, timestamp, type, message }]);
+  };
 
   useEffect(() => {
-    // One-time checks on startup
-    window.electronAPI.checkAdmin().then(setIsAdmin);
+    addLog('INFO', 'Application initialized.');
     window.electronAPI.onWindowStateChange(setIsMaximized);
     window.electronAPI.getWindowsPath().then(setWindowsPath);
     
     const cleanupStart = window.electronAPI.onCommandStart((description) => {
         setIsBusy(true);
-        setLog(prev => `${prev}\n\n[STARTING] ${description}...\n`);
+        setStatusMessage(description + '...');
+        addLog('START', description);
     });
+
     const cleanupOutput = window.electronAPI.onCommandOutput((output) => {
-        setLog(prev => prev + output);
+        const cleanedOutput = output.trim();
+        if (cleanedOutput) {
+           addLog('OUTPUT', cleanedOutput);
+        }
     });
+
     const cleanupEnd = window.electronAPI.onCommandEnd((code) => {
-        setLog(prev => `${prev}\n[FINISHED] Process exited with code: ${code}. ${code === 0 ? 'Success!' : 'Check logs for errors.'}\n`);
+        const success = code === 0;
+        const message = `Process finished. ${success ? 'Success!' : 'Completed with errors.'}`;
+        addLog(success ? 'END_SUCCESS' : 'END_ERROR', `Process exited with code: ${code}.`);
+        setStatusMessage(message);
         setIsBusy(false);
+
+        if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+        statusTimerRef.current = window.setTimeout(() => setStatusMessage('Ready.'), 4000);
     });
     
     return () => {
       cleanupStart();
       cleanupOutput();
       cleanupEnd();
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
     };
   }, []);
   
@@ -151,9 +204,10 @@ const App: React.FC = () => {
   };
 
   const checkRestoreStatus = () => {
+    addLog('INFO', 'Checking System Restore status...');
     window.electronAPI.checkSystemRestore().then(status => {
       setIsSystemRestoreEnabled(status);
-      setLog(prev => `${prev}\n[INFO] System Restore is ${status ? 'ENABLED' : 'DISABLED'}.`);
+      addLog('INFO', `System Restore is ${status ? 'ENABLED' : 'DISABLED'}.`);
     });
   };
   
@@ -167,25 +221,30 @@ const App: React.FC = () => {
     if (isBusy) return;
     const command = `pnputil /enum-drivers`;
     setDrivers([]);
-    window.electronAPI.runCommand(command, "Scanning for all third-party drivers");
+    const fullOutput: string[] = [];
     
-    // The output will be appended to the log. We need to parse it after the command finishes.
-    const cleanup = window.electronAPI.onCommandEnd(() => {
-        setLog(prev => {
-            const parsedDrivers = parsePnpUtilOutput(prev);
-            setDrivers(parsedDrivers);
-            return `${prev}\n[INFO] Found and parsed ${parsedDrivers.length} drivers.`;
-        });
-        cleanup(); // Self-destruct listener
+    const tempOutputListener = window.electronAPI.onCommandOutput(output => fullOutput.push(output));
+    
+    const cleanupEnd = window.electronAPI.onCommandEnd(() => {
+        const parsedDrivers = parsePnpUtilOutput(fullOutput.join('\n'));
+        setDrivers(parsedDrivers);
+        addLog('INFO', `Found and parsed ${parsedDrivers.length} drivers.`);
+        tempOutputListener(); // Remove temporary listener
+        cleanupEnd(); // Self-destruct
     });
+    
+    window.electronAPI.runCommand(command, "Scanning for all third-party drivers");
   };
 
   const parsePnpUtilOutput = (output: string): DriverInfo[] => {
-    const drivers: DriverInfo[] = [];
+    const driversMap: Map<string, Partial<DriverInfo>> = new Map();
     const entries = output.split('Published Name :').slice(1);
     entries.forEach(entry => {
         const lines = entry.trim().split('\n');
-        const driver: Partial<DriverInfo> = { publishedName: lines[0].trim() };
+        const publishedName = lines[0].trim();
+        if (!publishedName) return;
+
+        const driver: Partial<DriverInfo> = { publishedName };
         lines.slice(1).forEach(line => {
             const [key, ...valueParts] = line.split(':');
             const value = valueParts.join(':').trim();
@@ -194,10 +253,10 @@ const App: React.FC = () => {
             else if (key.includes('Class Name')) driver.className = value;
         });
         if(driver.originalName && driver.provider && driver.className) {
-            drivers.push(driver as DriverInfo);
+            driversMap.set(publishedName, driver);
         }
     });
-    return drivers;
+    return Array.from(driversMap.values()) as DriverInfo[];
   };
   
   const toggleDriverSelection = (publishedName: string) => {
@@ -242,7 +301,29 @@ const App: React.FC = () => {
     { id: 'full-restore', icon: 'fa-history', label: 'بازیابی کامل' },
     { id: 'selective-backup', icon: 'fa-tasks', label: 'پشتیبان‌گیری انتخابی' },
     { id: 'selective-restore', icon: 'fa-mouse-pointer', label: 'بازیابی انتخابی' },
+    { id: 'logs', icon: 'fa-file-alt', label: 'لاگ‌ها' },
   ];
+
+  const logTypeStyles: Record<LogType, string> = {
+    INFO: "text-gray-400",
+    START: "text-blue-400",
+    OUTPUT: "text-gray-300",
+    WARN: "text-yellow-400",
+    END_SUCCESS: "text-green-400",
+    END_ERROR: "text-red-400",
+  };
+
+  const filteredLogs = useMemo(() => 
+    logs.filter(log => log.message.toLowerCase().includes(logFilter.toLowerCase())),
+    [logs, logFilter]
+  );
+  const logContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [filteredLogs]);
+
 
   const renderContent = () => {
     switch (activeTab) {
@@ -252,10 +333,10 @@ const App: React.FC = () => {
             <h2 className="text-2xl font-bold mb-4 text-gray-200">پشتیبان‌گیری از تمام درایورها</h2>
             <p className="text-gray-400 mb-6">تمام درایورهای شخص ثالث (third-party) را در یک پوشه ذخیره کنید.</p>
             <div className="flex items-center space-x-reverse space-x-2 mb-6">
-                <input type="text" readOnly value={backupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="flex-grow bg-gray-900/50 ring-1 ring-white/10 rounded-md p-2 text-gray-300 focus:outline-none focus:ring-green-500" />
-                <button onClick={() => handleSelectFolder(setBackupPath)} disabled={isBusy} className="px-4 py-2 bg-gray-600 rounded-md hover:bg-gray-500 transition-colors disabled:opacity-50"><i className="fas fa-folder-open"></i></button>
+                <input type="text" readOnly value={backupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
+                <button onClick={() => handleSelectFolder(setBackupPath)} disabled={isBusy} className="btn-secondary"><i className="fas fa-folder-open"></i></button>
             </div>
-            <button onClick={handleFullBackup} disabled={!backupPath || isBusy} className="w-full bg-green-600 text-white font-bold py-3 px-8 rounded-md hover:bg-green-500 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100">
+            <button onClick={handleFullBackup} disabled={!backupPath || isBusy} className="btn-primary">
                 <i className="fas fa-play mr-2"></i> شروع پشتیبان‌گیری
             </button>
           </>
@@ -268,18 +349,19 @@ const App: React.FC = () => {
             <div className="bg-yellow-900/30 text-yellow-300 p-3 rounded-md mb-4 text-sm ring-1 ring-yellow-500/30 flex items-start gap-3">
                 <i className="fas fa-exclamation-triangle mt-1"></i>
                 <div>
-                    <button onClick={checkRestoreStatus} className="font-bold underline hover:text-yellow-200" disabled={isBusy}>بررسی وضعیت System Restore</button>
-                    {!isSystemRestoreEnabled && <p className="mt-1">System Restore غیرفعال است. برای فعال‌سازی به کنترل پنل مراجعه کنید.</p>}
+                  <button onClick={checkRestoreStatus} className="font-bold underline hover:text-yellow-200" disabled={isBusy}>بررسی وضعیت System Restore</button>
+                  {isSystemRestoreEnabled === false && <p className="mt-1">System Restore غیرفعال است. برای فعال‌سازی به کنترل پنل مراجعه کنید.</p>}
+                  {isSystemRestoreEnabled === true && <p className="mt-1 text-green-300">System Restore فعال است.</p>}
                 </div>
             </div>
-            <button onClick={handleCreateRestorePoint} disabled={isBusy} className="w-full mb-6 bg-blue-600 text-white font-bold py-3 px-8 rounded-md hover:bg-blue-500 active:scale-95 transition-all disabled:opacity-50">
+            <button onClick={handleCreateRestorePoint} disabled={isBusy} className="btn-info mb-6">
                 <i className="fas fa-shield-alt mr-2"></i> ایجاد نقطه بازیابی سیستم
             </button>
             <div className="flex items-center space-x-reverse space-x-2 mb-6">
-                <input type="text" readOnly value={restorePath} placeholder="پوشه پشتیبان را انتخاب کنید..." className="flex-grow bg-gray-900/50 ring-1 ring-white/10 rounded-md p-2 text-gray-300 focus:outline-none focus:ring-green-500" />
-                <button onClick={() => handleSelectFolder(setRestorePath)} disabled={isBusy} className="px-4 py-2 bg-gray-600 rounded-md hover:bg-gray-500 transition-colors disabled:opacity-50"><i className="fas fa-folder"></i></button>
+                <input type="text" readOnly value={restorePath} placeholder="پوشه پشتیبان را انتخاب کنید..." className="form-input-custom" />
+                <button onClick={() => handleSelectFolder(setRestorePath)} disabled={isBusy} className="btn-secondary"><i className="fas fa-folder"></i></button>
             </div>
-            <button onClick={handleFullRestore} disabled={!restorePath || isBusy} className="w-full bg-green-600 text-white font-bold py-3 px-8 rounded-md hover:bg-green-500 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100">
+            <button onClick={handleFullRestore} disabled={!restorePath || isBusy} className="btn-primary">
                 <i className="fas fa-play mr-2"></i> شروع بازیابی
             </button>
           </>
@@ -289,25 +371,25 @@ const App: React.FC = () => {
           <>
             <h2 className="text-2xl font-bold mb-4 text-gray-200">پشتیبان‌گیری انتخابی</h2>
             <p className="text-gray-400 mb-2">درایورهای مورد نظر خود را برای پشتیبان‌گیری انتخاب کنید.</p>
-            <button onClick={handleScanDrivers} disabled={isBusy} className="w-full mb-4 bg-gray-600 text-white font-bold py-3 px-8 rounded-md hover:bg-gray-500 active:scale-95 transition-all disabled:opacity-50">
+            <button onClick={handleScanDrivers} disabled={isBusy} className="btn-secondary mb-4 w-full">
                 <i className="fas fa-search mr-2"></i> اسکن درایورهای سیستم
             </button>
-            <div className="h-48 overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md mb-4 p-2">
+            <div className="h-56 overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md mb-4 p-2">
                 {drivers.length === 0 && <p className="text-gray-500 text-center p-4">برای مشاهده لیست، سیستم را اسکن کنید.</p>}
                 {drivers.map(driver => (
-                    <div key={driver.publishedName} className="flex items-center p-2 rounded hover:bg-white/5">
-                        <input type="checkbox" id={driver.publishedName} checked={selectedDrivers.has(driver.publishedName)} onChange={() => toggleDriverSelection(driver.publishedName)} className="ml-3 accent-green-500 w-4 h-4" />
-                        <label htmlFor={driver.publishedName} className="flex-grow cursor-pointer text-sm">
+                    <div key={driver.publishedName} className="flex items-center p-2 rounded hover:bg-white/5 transition-colors">
+                        <input type="checkbox" id={driver.publishedName} checked={selectedDrivers.has(driver.publishedName)} onChange={() => toggleDriverSelection(driver.publishedName)} />
+                        <label htmlFor={driver.publishedName} className="flex-grow cursor-pointer text-sm pr-3">
                             <span className="font-bold text-gray-200">{driver.provider}</span> - <span className="text-gray-400">{driver.className} ({driver.originalName})</span>
                         </label>
                     </div>
                 ))}
             </div>
              <div className="flex items-center space-x-reverse space-x-2 mb-4">
-                <input type="text" readOnly value={selectiveBackupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="flex-grow bg-gray-900/50 ring-1 ring-white/10 rounded-md p-2 text-gray-300 focus:outline-none focus:ring-green-500" />
-                <button onClick={() => handleSelectFolder(setSelectiveBackupPath)} disabled={isBusy} className="px-4 py-2 bg-gray-600 rounded-md hover:bg-gray-500 transition-colors disabled:opacity-50"><i className="fas fa-folder-open"></i></button>
+                <input type="text" readOnly value={selectiveBackupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
+                <button onClick={() => handleSelectFolder(setSelectiveBackupPath)} disabled={isBusy} className="btn-secondary"><i className="fas fa-folder-open"></i></button>
             </div>
-            <button onClick={handleSelectiveBackup} disabled={selectedDrivers.size === 0 || !selectiveBackupPath || isBusy} className="w-full bg-green-600 text-white font-bold py-3 px-8 rounded-md hover:bg-green-500 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100">
+            <button onClick={handleSelectiveBackup} disabled={selectedDrivers.size === 0 || !selectiveBackupPath || isBusy} className="btn-primary">
                 <i className="fas fa-download mr-2"></i> پشتیبان‌گیری از {selectedDrivers.size} درایور
             </button>
           </>
@@ -321,21 +403,41 @@ const App: React.FC = () => {
                 <i className="fas fa-exclamation-triangle mt-1"></i>
                 <p>توصیه می‌شود قبل از ادامه، یک نقطه بازیابی سیستم ایجاد کنید.</p>
             </div>
-            <button onClick={handleCreateRestorePoint} disabled={isBusy} className="w-full mb-6 bg-blue-600 text-white font-bold py-3 px-8 rounded-md hover:bg-blue-500 active:scale-95 transition-all disabled:opacity-50">
+            <button onClick={handleCreateRestorePoint} disabled={isBusy} className="btn-info mb-6">
                 <i className="fas fa-shield-alt mr-2"></i> ایجاد نقطه بازیابی سیستم
             </button>
 
             <div className="flex items-center space-x-reverse space-x-2 mb-6">
-                <div className="flex-grow bg-gray-900/50 ring-1 ring-white/10 rounded-md p-2 text-gray-400 text-sm h-12 overflow-y-auto">
+                <div className="form-input-custom h-12 overflow-y-auto text-gray-400 text-sm">
                     {selectiveRestoreFiles.length > 0 ? `${selectiveRestoreFiles.length} فایل انتخاب شد.` : 'فایل‌های .inf را انتخاب کنید...'}
                 </div>
-                <button onClick={handleSelectRestoreFiles} disabled={isBusy} className="px-4 py-2 bg-gray-600 rounded-md hover:bg-gray-500 transition-colors disabled:opacity-50"><i className="fas fa-file-import"></i></button>
+                <button onClick={handleSelectRestoreFiles} disabled={isBusy} className="btn-secondary"><i className="fas fa-file-import"></i></button>
             </div>
-            <button onClick={handleSelectiveRestore} disabled={selectiveRestoreFiles.length === 0 || isBusy} className="w-full bg-green-600 text-white font-bold py-3 px-8 rounded-md hover:bg-green-500 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100">
+            <button onClick={handleSelectiveRestore} disabled={selectiveRestoreFiles.length === 0 || isBusy} className="btn-primary">
                 <i className="fas fa-play mr-2"></i> شروع بازیابی انتخابی
             </button>
           </>
         );
+      case 'logs':
+        return (
+           <div className="h-full flex flex-col">
+            <h2 className="text-2xl font-bold mb-4 text-gray-200">لاگ‌های برنامه</h2>
+             <div className="flex items-center gap-2 mb-4">
+                <input type="text" value={logFilter} onChange={e => setLogFilter(e.target.value)} placeholder="فیلتر لاگ‌ها..." className="form-input-custom flex-grow" />
+                <button onClick={() => navigator.clipboard.writeText(logs.map(l => `[${l.timestamp}] [${l.type}] ${l.message}`).join('\n'))} className="btn-secondary" aria-label="Copy Logs"><i className="fas fa-copy"></i></button>
+                <button onClick={() => setLogs([])} className="btn-secondary" aria-label="Clear Logs"><i className="fas fa-trash"></i></button>
+            </div>
+            <div ref={logContainerRef} className="flex-grow bg-gray-900/80 rounded-lg ring-1 ring-white/10 p-4 font-mono text-xs overflow-y-auto whitespace-pre-wrap">
+                {filteredLogs.map(log => (
+                    <div key={log.id} className="flex">
+                        <span className="text-gray-500 mr-4">{log.timestamp}</span>
+                        <span className={`w-24 font-bold ${logTypeStyles[log.type]}`}>[{log.type}]</span>
+                        <span className={`flex-1 ${logTypeStyles[log.type]}`}>{log.message}</span>
+                    </div>
+                ))}
+            </div>
+           </div>
+        )
       default: return null;
     }
   };
@@ -343,39 +445,47 @@ const App: React.FC = () => {
   return (
     <div className="h-screen w-screen overflow-hidden bg-black flex flex-col">
       <TitleBar isMaximized={isMaximized} />
-      <div className="pt-8 flex-grow flex">
-        {/* Main Content */}
-        <main className="flex-grow p-6 flex flex-col">
-          {!isAdmin && (
-            <div className="bg-red-900/50 text-red-300 p-3 rounded-md mb-4 ring-1 ring-red-500/30 flex items-center gap-3">
-              <i className="fas fa-exclamation-triangle"></i>
-              <span>برنامه با دسترسی ادمین اجرا نشده است. بسیاری از عملکردها کار نخواهند کرد.</span>
+      <div className="pt-8 flex-grow flex flex-col">
+        <nav className="flex-shrink-0 px-6 border-b border-white/10">
+            <div className="flex items-center space-x-reverse space-x-4">
+                {tabs.map(tab => (
+                     <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        disabled={isBusy}
+                        className={`py-3 px-2 text-sm font-medium transition-colors duration-200 border-b-2 disabled:opacity-50 ${activeTab === tab.id ? 'border-green-400 text-green-300' : 'border-transparent text-gray-400 hover:text-white'}`}
+                    >
+                        <i className={`fas ${tab.icon} ml-2`}></i>
+                        {tab.label}
+                    </button>
+                ))}
             </div>
-          )}
-          <div className="flex-grow bg-gray-800/50 backdrop-blur-sm rounded-lg shadow-2xl shadow-black/30 ring-1 ring-white/10 p-6">
+        </nav>
+
+        <main className="flex-grow p-6 overflow-y-auto">
+           <div className="bg-gray-800/50 backdrop-blur-sm rounded-lg shadow-2xl shadow-black/30 ring-1 ring-white/10 p-6 h-full">
             {renderContent()}
           </div>
-          <div ref={logRef} className="h-48 mt-4 bg-gray-900/80 rounded-lg ring-1 ring-white/10 p-4 font-mono text-xs text-gray-400 overflow-y-auto whitespace-pre-wrap selection:bg-green-600 selection:text-white">
-            {log}
-          </div>
         </main>
-        {/* Sidebar */}
-        <aside className="w-48 bg-gray-900/50 ring-1 ring-white/10 flex-shrink-0 flex flex-col items-center p-4">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              disabled={isBusy}
-              className={`w-full text-right p-3 my-1 rounded-md transition-colors duration-200 flex items-center disabled:opacity-50 ${activeTab === tab.id ? 'bg-green-600/20 text-green-300' : 'text-gray-400 hover:bg-white/5'}`}
-            >
-              <i className={`fas ${tab.icon} w-8 text-center text-lg`}></i>
-              <span className="font-medium">{tab.label}</span>
-            </button>
-          ))}
-        </aside>
+        
+        <footer className="flex-shrink-0 h-8 px-4 bg-gray-900/70 ring-1 ring-white/10 flex items-center justify-between text-sm text-gray-400">
+            <span>{statusMessage}</span>
+            {isBusy && (
+                 <div className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-green-500 to-teal-400 animated-gradient"></div>
+                </div>
+            )}
+        </footer>
       </div>
     </div>
   );
 };
 
-export default App;
+
+const RootApp: React.FC = () => (
+  <AdminGate>
+    <App />
+  </AdminGate>
+);
+
+export default RootApp;

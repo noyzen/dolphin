@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { OpenDialogOptions } from 'electron';
 
 declare module 'react' {
@@ -20,6 +20,13 @@ interface LogEntry {
   id: number;
   timestamp: string;
   type: LogType;
+  message: string;
+}
+
+interface Notification {
+  id: number;
+  type: 'info' | 'success' | 'warning' | 'error';
+  title: string;
   message: string;
 }
 
@@ -45,6 +52,67 @@ declare global {
 }
 
 let logIdCounter = 0;
+
+const NotificationUI: React.FC<{ notification: Notification; onDismiss: (id: number) => void; }> = ({ notification, onDismiss }) => {
+  const [show, setShow] = useState(false);
+
+  const notificationStyles = {
+    info: { icon: 'fa-info-circle', base: 'bg-blue-500/30 text-blue-200 border-blue-400' },
+    success: { icon: 'fa-check-circle', base: 'bg-green-500/30 text-green-200 border-green-400' },
+    warning: { icon: 'fa-exclamation-triangle', base: 'bg-yellow-500/30 text-yellow-200 border-yellow-400' },
+    error: { icon: 'fa-times-circle', base: 'bg-red-500/30 text-red-200 border-red-400' },
+  };
+
+  const style = notificationStyles[notification.type];
+
+  useEffect(() => {
+    setShow(true); // Animate in
+    if (notification.type !== 'error') {
+      const timer = setTimeout(() => {
+        handleDismiss();
+      }, 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
+
+  const handleDismiss = () => {
+    setShow(false); // Animate out
+    setTimeout(() => onDismiss(notification.id), 300); // Wait for animation to finish
+  };
+
+  return (
+    <div
+      className={`relative w-80 max-w-sm rounded-lg shadow-lg backdrop-blur-md ring-1 ring-white/10 overflow-hidden border-l-4 transition-all duration-300 ease-in-out transform ${style.base} ${show ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-full'}`}
+      role="alert"
+    >
+      <div className="p-4 flex items-start gap-4">
+        <i className={`fas ${style.icon} text-xl mt-1`}></i>
+        <div className="flex-1">
+          <p className="font-bold text-white">{notification.title}</p>
+          <p className="text-sm">{notification.message}</p>
+        </div>
+        <button
+          onClick={handleDismiss}
+          className="absolute top-2 right-2 text-gray-400 hover:text-white transition-colors"
+          aria-label="بستن"
+        >
+          <i className="fas fa-times"></i>
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const NotificationContainer: React.FC<{ notifications: Notification[]; onDismiss: (id: number) => void; }> = ({ notifications, onDismiss }) => {
+  return (
+    <div className="fixed top-10 right-4 z-[100] space-y-3" style={{ WebkitAppRegion: 'no-drag' }}>
+      {notifications.map(notification => (
+        <NotificationUI key={notification.id} notification={notification} onDismiss={onDismiss} />
+      ))}
+    </div>
+  );
+};
+
 
 const TitleBar: React.FC<{ isMaximized: boolean }> = ({ isMaximized }) => {
   return (
@@ -94,6 +162,8 @@ const App: React.FC = () => {
   const [isBusy, setIsBusy] = useState(false);
   const [statusMessage, setStatusMessage] = useState('به Driver Dolphin خوش آمدید! آماده برای شروع...');
   const [logFilter, setLogFilter] = useState('');
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [currentOperation, setCurrentOperation] = useState('');
 
   // Paths
   const [backupPath, setBackupPath] = useState('');
@@ -113,6 +183,16 @@ const App: React.FC = () => {
   const [selectiveRestoreFiles, setSelectiveRestoreFiles] = useState<string[]>([]);
   
   const statusTimerRef = useRef<number | null>(null);
+  const notificationIdCounter = useRef(0);
+
+  const removeNotification = useCallback((id: number) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  }, []);
+
+  const addNotification = useCallback((type: Notification['type'], title: string, message: string) => {
+    const id = notificationIdCounter.current++;
+    setNotifications(prev => [...prev, { id, type, title, message }]);
+  }, []);
 
   const addLog = (type: LogType, message: string) => {
     const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -139,6 +219,7 @@ const App: React.FC = () => {
     const cleanupStart = window.electronAPI.onCommandStart((description) => {
         setIsBusy(true);
         setStatusMessage(description + '...');
+        setCurrentOperation(description);
         addLog('START', description);
     });
 
@@ -155,6 +236,15 @@ const App: React.FC = () => {
         addLog(success ? 'END_SUCCESS' : 'END_ERROR', `فرآیند با کد خروجی ${code} پایان یافت.`);
         setStatusMessage(message);
         setIsBusy(false);
+        
+        if (currentOperation) {
+            if (success) {
+                addNotification('success', 'عملیات موفق', `${currentOperation} با موفقیت به پایان رسید.`);
+            } else {
+                addNotification('error', 'عملیات ناموفق', `${currentOperation} با خطا مواجه شد. به لاگ‌ها مراجعه کنید.`);
+            }
+        }
+        setCurrentOperation('');
 
         if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
         statusTimerRef.current = window.setTimeout(() => setStatusMessage('آماده.'), 4000);
@@ -166,7 +256,7 @@ const App: React.FC = () => {
       cleanupEnd();
       if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
     };
-  }, []);
+  }, [currentOperation, addNotification]);
   
   const handleSelectFolder = async (setter: React.Dispatch<React.SetStateAction<string>>) => {
     const paths = await window.electronAPI.selectDialog({ properties: ['openDirectory', 'createDirectory'] });
@@ -201,8 +291,13 @@ const App: React.FC = () => {
     if (success && (stdout.includes(warningMessage) || stderr.includes(warningMessage))) {
         message = "یک نقطه بازیابی به تازگی ایجاد شده است. ویندوز اجازه ایجاد نقطه جدید را نمی‌دهد.";
         addLog('WARN', message);
+        addNotification('warning', 'نقطه بازیابی', message);
+    } else if (success) {
+       addLog('END_SUCCESS', `فرآیند نقطه بازیابی با کد خروجی ${code} پایان یافت.`);
+       addNotification('success', 'موفقیت', 'نقطه بازیابی سیستم با موفقیت ایجاد شد.');
     } else {
-       addLog(success ? 'END_SUCCESS' : 'END_ERROR', `فرآیند نقطه بازیابی با کد خروجی ${code} پایان یافت.`);
+       addLog('END_ERROR', `فرآیند نقطه بازیابی با کد خروجی ${code} پایان یافت.`);
+       addNotification('error', 'خطا', 'ایجاد نقطه بازیابی با خطا مواجه شد. به لاگ‌ها مراجعه کنید.');
     }
 
     setStatusMessage(message);
@@ -276,6 +371,13 @@ const App: React.FC = () => {
     const message = `اسکن درایورها پایان یافت. ${success ? `${parsedDrivers.length} درایور یافت شد.` : 'با خطا خاتمه یافت.'}`;
     addLog(success ? 'END_SUCCESS' : 'END_ERROR', `فرآیند اسکن با کد خروجی ${code} پایان یافت.`);
     setStatusMessage(message);
+    
+    if (success) {
+      addNotification('success', 'اسکن کامل شد', `تعداد ${parsedDrivers.length} درایور شخص ثالث یافت شد.`);
+    } else {
+      addNotification('error', 'خطای اسکن', 'اسکن درایورهای سیستم با خطا مواجه شد.');
+    }
+
     setIsBusy(false);
 
     if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
@@ -574,6 +676,7 @@ const App: React.FC = () => {
   return (
     <div className="h-screen w-screen overflow-hidden bg-black flex flex-col">
       <TitleBar isMaximized={isMaximized} />
+      <NotificationContainer notifications={notifications} onDismiss={removeNotification} />
       <div className="pt-8 flex-grow flex flex-col" style={{minHeight: 0}}>
         {isAdmin === null && (
             <div className="flex-grow flex items-center justify-center">

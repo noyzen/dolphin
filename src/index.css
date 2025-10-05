@@ -1,0 +1,85 @@
+/* Import Font Awesome from local files */
+@import url('/fonts/all.min.css');
+
+/* Tailwind CSS Directives */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Shabnam Persian Font Definitions */
+@font-face {
+  font-family: 'Shabnam';
+  font-style: normal;
+  font-weight: 100; /* Thin */
+  src: url('/fonts/Shabnam-Thin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Shabnam';
+  font-style: normal;
+  font-weight: 300; /* Light */
+  src: url('/fonts/Shabnam-Light.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Shabnam';
+  font-style: normal;
+  font-weight: 400; /* Regular */
+  src: url('/fonts/Shabnam.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Shabnam';
+  font-style: normal;
+  font-weight: 500; /* Medium */
+  src: url('/fonts/Shabnam-Medium.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Shabnam';
+  font-style: normal;
+  font-weight: 700; /* Bold */
+  src: url('/fonts/Shabnam-Bold.woff2') format('woff2');
+}
+
+/* Base Body Styles */
+body {
+  @apply bg-black text-gray-100 font-sans antialiased;
+}
+
+/* Custom Animated Gradient for Headings */
+.animated-gradient {
+  background-size: 200% auto;
+  animation: gradient-animation 5s ease-in-out infinite;
+}
+
+@keyframes gradient-animation {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Custom Scrollbar Styles for Webkit Browsers */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.4);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}

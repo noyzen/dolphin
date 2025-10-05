@@ -1,0 +1,5 @@
+{
+  "name": "Driver Dolphin",
+  "description": "Windows driver backup and restore utility.",
+  "requestFramePermissions": []
+}

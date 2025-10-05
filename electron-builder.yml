@@ -1,0 +1,19 @@
+appId: com.example.hellopersian
+productName: "سلام دنیا"
+files:
+  - "dist/**/*"
+  - "dist-electron/**/*"
+  - "appicon.png"
+directories:
+  output: release
+win:
+  icon: appicon.png
+  executableName: "app"
+  target:
+    - dir
+    - portable
+    - nsis
+portable:
+  artifactName: app.${ext}
+nsis:
+  artifactName: "app setup.${ext}"

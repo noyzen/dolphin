@@ -213,7 +213,8 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
             $RootPath = '${escapedFolderPath}'
             
             try {
-                $infFiles = Get-ChildItem -Path $RootPath -Recurse -Filter *.inf -ErrorAction Stop;
+                # Ensure we only get files, not directories that happen to match the *.inf filter.
+                $infFiles = Get-ChildItem -Path $RootPath -Recurse -Filter *.inf -ErrorAction Stop | Where-Object { -not $_.PSIsContainer };
             } catch {
                 # This block catches errors from Get-ChildItem, like if the directory doesn't exist
                 Write-Output "[]"

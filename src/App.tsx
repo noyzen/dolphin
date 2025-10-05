@@ -34,6 +34,7 @@ declare global {
       checkAdmin: () => Promise<boolean>;
       selectDialog: (options: OpenDialogOptions) => Promise<string[]>;
       runCommand: (command: string, description: string) => void;
+      runCommandAndGetOutput: (command: string) => Promise<{ stdout: string; stderr: string; code: number | null }>;
       checkSystemRestore: () => Promise<boolean>;
       getWindowsPath: () => Promise<string>;
       onCommandStart: (callback: (description: string) => void) => () => void;
@@ -101,6 +102,7 @@ const App: React.FC = () => {
   
   // System state
   const [isSystemRestoreEnabled, setIsSystemRestoreEnabled] = useState<boolean | null>(null);
+  const [showRestoreWarningBanner, setShowRestoreWarningBanner] = useState(true);
 
   // Selective Backup
   const [drivers, setDrivers] = useState<DriverInfo[]>([]);
@@ -123,6 +125,16 @@ const App: React.FC = () => {
     addLog('INFO', 'برنامه راه‌اندازی شد.');
     window.electronAPI.onWindowStateChange(setIsMaximized);
     window.electronAPI.getWindowsPath().then(setWindowsPath);
+    
+    // Automatic System Restore check on startup
+    window.electronAPI.checkSystemRestore().then(status => {
+      setIsSystemRestoreEnabled(status);
+      if (!status) {
+        addLog('WARN', 'System Restore غیرفعال است. ایجاد نقطه بازیابی با خطا مواجه خواهد شد.');
+      } else {
+        addLog('INFO', 'System Restore فعال است.');
+      }
+    });
     
     const cleanupStart = window.electronAPI.onCommandStart((description) => {
         setIsBusy(true);
@@ -174,14 +186,6 @@ const App: React.FC = () => {
     const command = `powershell.exe -Command "Checkpoint-Computer -Description 'DriverDolphin Pre-Restore Point' -RestorePointType 'MODIFY_SETTINGS'"`;
     window.electronAPI.runCommand(command, "در حال ایجاد یک نقطه بازیابی سیستم جدید");
   };
-
-  const checkRestoreStatus = () => {
-    addLog('INFO', 'در حال بررسی وضعیت System Restore...');
-    window.electronAPI.checkSystemRestore().then(status => {
-      setIsSystemRestoreEnabled(status);
-      addLog('INFO', `وضعیت System Restore: ${status ? 'فعال' : 'غیرفعال'}.`);
-    });
-  };
   
   const handleFullRestore = () => {
     if (!restorePath || isBusy) return;
@@ -189,23 +193,35 @@ const App: React.FC = () => {
     window.electronAPI.runCommand(command, `در حال نصب تمام درایورها از "${restorePath}"`);
   };
 
-  const handleScanDrivers = () => {
+  const handleScanDrivers = async () => {
     if (isBusy) return;
     const command = `pnputil /enum-drivers`;
     setDrivers([]);
-    const fullOutput: string[] = [];
+    setSelectedDrivers(new Set());
     
-    const tempOutputListener = window.electronAPI.onCommandOutput(output => fullOutput.push(output));
-    
-    const cleanupEnd = window.electronAPI.onCommandEnd(() => {
-        const parsedDrivers = parsePnpUtilOutput(fullOutput.join('\n'));
+    setIsBusy(true);
+    setStatusMessage("در حال اسکن برای یافتن تمام درایورهای شخص ثالث...");
+    addLog('START', "شروع اسکن درایورهای سیستم");
+
+    const { stdout, stderr, code } = await window.electronAPI.runCommandAndGetOutput(command);
+
+    if (stderr) {
+        addLog('OUTPUT', `ERROR: ${stderr}`);
+    }
+    if (stdout) {
+        const parsedDrivers = parsePnpUtilOutput(stdout);
         setDrivers(parsedDrivers);
         addLog('INFO', `تعداد ${parsedDrivers.length} درایور پیدا و پردازش شد.`);
-        tempOutputListener(); // Remove temporary listener
-        cleanupEnd(); // Self-destruct
-    });
-    
-    window.electronAPI.runCommand(command, "در حال اسکن برای یافتن تمام درایورهای شخص ثالث");
+    }
+
+    const success = code === 0;
+    const message = `اسکن درایورها پایان یافت. ${success ? 'موفقیت‌آمیز بود.' : 'با خطا خاتمه یافت.'}`;
+    addLog(success ? 'END_SUCCESS' : 'END_ERROR', `فرآیند اسکن با کد خروجی ${code} پایان یافت.`);
+    setStatusMessage(message);
+    setIsBusy(false);
+
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    statusTimerRef.current = window.setTimeout(() => setStatusMessage('آماده.'), 4000);
   };
 
   const parsePnpUtilOutput = (output: string): DriverInfo[] => {
@@ -242,6 +258,15 @@ const App: React.FC = () => {
       return newSet;
     });
   };
+
+  const handleToggleSelectAll = () => {
+    if (selectedDrivers.size === drivers.length) {
+      setSelectedDrivers(new Set());
+    } else {
+      const allDriverNames = drivers.map(d => d.publishedName);
+      setSelectedDrivers(new Set(allDriverNames));
+    }
+  };
   
   const handleSelectiveBackup = () => {
       if(selectedDrivers.size === 0 || !selectiveBackupPath || isBusy) return;
@@ -264,7 +289,7 @@ const App: React.FC = () => {
 
   const handleSelectiveRestore = () => {
       if (selectiveRestoreFiles.length === 0 || isBusy) return;
-      const command = selectiveRestoreFiles.map(path => `pnputil /add-driver "${path}" /install`).join(' && ');
+      const command = `pnputil ${selectiveRestoreFiles.map(path => `/add-driver "${path}"`).join(' ')} /install`;
       window.electronAPI.runCommand(command, `در حال نصب ${selectiveRestoreFiles.length} درایور انتخاب شده`);
   };
 
@@ -301,52 +326,67 @@ const App: React.FC = () => {
     switch (activeTab) {
       case 'full-backup':
         return (
-          <>
+          <div className="flex flex-col h-full">
             <h2 className="text-2xl font-bold mb-4 text-gray-200">پشتیبان‌گیری از تمام درایورها</h2>
             <p className="text-gray-400 mb-6">تمام درایورهای شخص ثالث (third-party) را در یک پوشه ذخیره کنید.</p>
             <div className="flex items-center space-x-reverse space-x-2 mb-6">
                 <input type="text" readOnly value={backupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
-                <button onClick={() => handleSelectFolder(setBackupPath)} disabled={isBusy} className="btn-secondary"><i className="fas fa-folder-open"></i></button>
+                <button onClick={() => handleSelectFolder(setBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder-open"></i></button>
             </div>
-            <button onClick={handleFullBackup} disabled={!backupPath || isBusy} className="btn-primary">
-                <i className="fas fa-play mr-2"></i> شروع پشتیبان‌گیری
-            </button>
-          </>
+            <div className="mt-auto flex justify-start">
+              <button onClick={handleFullBackup} disabled={!backupPath || isBusy} className="btn-primary w-64">
+                  <i className="fas fa-play mr-2"></i> شروع پشتیبان‌گیری
+              </button>
+            </div>
+          </div>
         );
       case 'full-restore':
          return (
-          <>
+          <div className="flex flex-col h-full">
             <h2 className="text-2xl font-bold mb-4 text-gray-200">بازیابی تمام درایورها</h2>
             <p className="text-gray-400 mb-6">درایورها را از یک پوشه پشتیبان نصب کنید. توصیه می‌شود ابتدا یک نقطه بازیابی سیستم (Restore Point) ایجاد کنید.</p>
-            <div className="bg-yellow-900/30 text-yellow-300 p-3 rounded-md mb-4 text-sm ring-1 ring-yellow-500/30 flex items-start gap-3">
-                <i className="fas fa-exclamation-triangle mt-1"></i>
-                <div>
-                  <button onClick={checkRestoreStatus} className="font-bold underline hover:text-yellow-200" disabled={isBusy}>بررسی وضعیت System Restore</button>
-                  {isSystemRestoreEnabled === false && <p className="mt-1">System Restore غیرفعال است. برای فعال‌سازی به کنترل پنل مراجعه کنید.</p>}
-                  {isSystemRestoreEnabled === true && <p className="mt-1 text-green-300">System Restore فعال است.</p>}
-                </div>
+            
+            <div className="mb-6 space-y-4">
+              <p className="text-gray-400 text-sm">
+                  وضعیت System Restore: {isSystemRestoreEnabled === null ? 'در حال بررسی...' : isSystemRestoreEnabled ? <span className="text-green-400 font-bold">فعال</span> : <span className="text-red-400 font-bold">غیرفعال</span>}
+              </p>
+              <button onClick={handleCreateRestorePoint} disabled={isBusy || !isSystemRestoreEnabled} className="btn-info w-64">
+                  <i className="fas fa-shield-alt mr-2"></i> ایجاد نقطه بازیابی
+              </button>
             </div>
-            <button onClick={handleCreateRestorePoint} disabled={isBusy} className="btn-info mb-6">
-                <i className="fas fa-shield-alt mr-2"></i> ایجاد نقطه بازیابی سیستم
-            </button>
+
             <div className="flex items-center space-x-reverse space-x-2 mb-6">
                 <input type="text" readOnly value={restorePath} placeholder="پوشه پشتیبان را انتخاب کنید..." className="form-input-custom" />
-                <button onClick={() => handleSelectFolder(setRestorePath)} disabled={isBusy} className="btn-secondary"><i className="fas fa-folder"></i></button>
+                <button onClick={() => handleSelectFolder(setRestorePath)} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder"></i></button>
             </div>
-            <button onClick={handleFullRestore} disabled={!restorePath || isBusy} className="btn-primary">
-                <i className="fas fa-play mr-2"></i> شروع بازیابی
-            </button>
-          </>
+            <div className="mt-auto flex justify-start">
+              <button onClick={handleFullRestore} disabled={!restorePath || isBusy} className="btn-primary w-64">
+                  <i className="fas fa-play mr-2"></i> شروع بازیابی
+              </button>
+            </div>
+          </div>
         );
       case 'selective-backup':
         return (
-          <>
+          <div className="flex flex-col h-full">
             <h2 className="text-2xl font-bold mb-4 text-gray-200">پشتیبان‌گیری انتخابی</h2>
             <p className="text-gray-400 mb-2">درایورهای مورد نظر خود را برای پشتیبان‌گیری انتخاب کنید.</p>
-            <button onClick={handleScanDrivers} disabled={isBusy} className="btn-secondary mb-4 w-full">
-                <i className="fas fa-search mr-2"></i> اسکن درایورهای سیستم
-            </button>
-            <div className="h-56 overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md mb-4 p-2">
+            <div className="mb-4">
+              <button onClick={handleScanDrivers} disabled={isBusy} className="btn-secondary w-64">
+                  <i className="fas fa-search mr-2"></i> اسکن درایورهای سیستم
+              </button>
+            </div>
+             <div className="flex items-center mb-2">
+                <input 
+                    type="checkbox" 
+                    id="select-all-drivers"
+                    checked={drivers.length > 0 && selectedDrivers.size === drivers.length}
+                    onChange={handleToggleSelectAll}
+                    disabled={drivers.length === 0 || isBusy}
+                />
+                <label htmlFor="select-all-drivers" className="pr-2 text-sm text-gray-300 cursor-pointer">انتخاب / عدم انتخاب همه</label>
+            </div>
+            <div className="flex-grow overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md mb-4 p-2">
                 {drivers.length === 0 && <p className="text-gray-500 text-center p-4">برای مشاهده لیست، سیستم را اسکن کنید.</p>}
                 {drivers.map(driver => (
                     <div key={driver.publishedName} className="flex items-center p-2 rounded hover:bg-white/5 transition-colors">
@@ -359,36 +399,51 @@ const App: React.FC = () => {
             </div>
              <div className="flex items-center space-x-reverse space-x-2 mb-4">
                 <input type="text" readOnly value={selectiveBackupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
-                <button onClick={() => handleSelectFolder(setSelectiveBackupPath)} disabled={isBusy} className="btn-secondary"><i className="fas fa-folder-open"></i></button>
+                <button onClick={() => handleSelectFolder(setSelectiveBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-folder-open"></i></button>
             </div>
-            <button onClick={handleSelectiveBackup} disabled={selectedDrivers.size === 0 || !selectiveBackupPath || isBusy} className="btn-primary">
-                <i className="fas fa-download mr-2"></i> پشتیبان‌گیری از {selectedDrivers.size} درایور
-            </button>
-          </>
+            <div className="flex justify-start">
+              <button onClick={handleSelectiveBackup} disabled={selectedDrivers.size === 0 || !selectiveBackupPath || isBusy} className="btn-primary w-64">
+                  <i className="fas fa-download mr-2"></i> پشتیبان‌گیری از {selectedDrivers.size} درایور
+              </button>
+            </div>
+          </div>
         );
       case 'selective-restore':
          return (
-          <>
+          <div className="flex flex-col h-full">
             <h2 className="text-2xl font-bold mb-4 text-gray-200">بازیابی انتخابی</h2>
             <p className="text-gray-400 mb-6">فایل‌های .inf درایورهای مورد نظر برای نصب را انتخاب کنید.</p>
-             <div className="bg-yellow-900/30 text-yellow-300 p-3 rounded-md mb-4 text-sm ring-1 ring-yellow-500/30 flex items-start gap-3">
-                <i className="fas fa-exclamation-triangle mt-1"></i>
-                <p>توصیه می‌شود قبل از ادامه، یک نقطه بازیابی سیستم ایجاد کنید.</p>
+            
+            <div className="mb-6">
+               <button onClick={handleCreateRestorePoint} disabled={isBusy || !isSystemRestoreEnabled} className="btn-info w-64">
+                  <i className="fas fa-shield-alt mr-2"></i> ایجاد نقطه بازیابی
+              </button>
             </div>
-            <button onClick={handleCreateRestorePoint} disabled={isBusy} className="btn-info mb-6">
-                <i className="fas fa-shield-alt mr-2"></i> ایجاد نقطه بازیابی سیستم
-            </button>
 
             <div className="flex items-center space-x-reverse space-x-2 mb-6">
-                <div className="form-input-custom h-12 overflow-y-auto text-gray-400 text-sm">
-                    {selectiveRestoreFiles.length > 0 ? `${selectiveRestoreFiles.length} فایل انتخاب شد.` : 'فایل‌های .inf را انتخاب کنید...'}
+                <div className="form-input-custom h-24 overflow-y-auto text-gray-400 text-sm p-2">
+                    {selectiveRestoreFiles.length > 0 ? (
+                        <ul className="space-y-1">
+                            {selectiveRestoreFiles.map((file, index) => (
+                                <li key={index} className="truncate text-xs font-mono" title={file}>
+                                    {file.split(/[\\/]/).pop()}
+                                </li>
+                            ))}
+                        </ul>
+                    ) : (
+                        <div className="flex items-center justify-center h-full">
+                            <span>فایل‌های .inf را انتخاب کنید...</span>
+                        </div>
+                    )}
                 </div>
-                <button onClick={handleSelectRestoreFiles} disabled={isBusy} className="btn-secondary"><i className="fas fa-file-import"></i></button>
+                <button onClick={handleSelectRestoreFiles} disabled={isBusy} className="btn-secondary flex-shrink-0"><i className="fas fa-file-import"></i></button>
             </div>
-            <button onClick={handleSelectiveRestore} disabled={selectiveRestoreFiles.length === 0 || isBusy} className="btn-primary">
-                <i className="fas fa-play mr-2"></i> شروع بازیابی انتخابی
-            </button>
-          </>
+            <div className="mt-auto flex justify-start">
+              <button onClick={handleSelectiveRestore} disabled={selectiveRestoreFiles.length === 0 || isBusy} className="btn-primary w-64">
+                  <i className="fas fa-play mr-2"></i> شروع بازیابی انتخابی
+              </button>
+            </div>
+          </div>
         );
       case 'logs':
         return (
@@ -403,7 +458,7 @@ const App: React.FC = () => {
                 {filteredLogs.map(log => (
                     <div key={log.id} className="flex">
                         <span className="text-gray-500 mr-4">{log.timestamp}</span>
-                        <span className={`w-24 font-bold ${logTypeStyles[log.type]}`}>[{log.type}]</span>
+                        <span className={`w-24 font-bold ${logTypeStyles[log.type]}`}>{`[${log.type}]`}</span>
                         <span className={`flex-1 ${logTypeStyles[log.type]}`}>{log.message}</span>
                     </div>
                 ))}
@@ -435,23 +490,36 @@ const App: React.FC = () => {
 
   const renderAppContent = () => (
      <>
-        <nav className="flex-shrink-0 px-6 border-b border-white/10">
-            <div className="flex items-center space-x-reverse space-x-4">
-                {tabs.map(tab => (
-                     <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id)}
-                        disabled={isBusy}
-                        className={`py-3 px-2 text-sm font-medium transition-colors duration-200 border-b-2 disabled:opacity-50 ${activeTab === tab.id ? 'border-green-400 text-green-300' : 'border-transparent text-gray-400 hover:text-white'}`}
-                    >
-                        <i className={`fas ${tab.icon} ml-2`}></i>
-                        {tab.label}
-                    </button>
-                ))}
-            </div>
-        </nav>
+        <div className="flex-shrink-0">
+          {isSystemRestoreEnabled === false && showRestoreWarningBanner && (
+              <div className="bg-yellow-900/50 text-yellow-200 p-3 mx-4 mt-2 rounded-md text-sm ring-1 ring-yellow-500/50 flex items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <i className="fas fa-exclamation-triangle mt-1"></i>
+                    <span>System Restore غیرفعال است. قابلیت ایجاد نقطه بازیابی کار نخواهد کرد. برای فعال‌سازی به کنترل پنل ویندوز مراجعه کنید.</span>
+                  </div>
+                  <button onClick={() => setShowRestoreWarningBanner(false)} className="text-yellow-300 hover:text-white transition-colors" aria-label="بستن هشدار">
+                      <i className="fas fa-times"></i>
+                  </button>
+              </div>
+          )}
+          <nav className="px-6 border-b border-white/10">
+              <div className="flex items-center space-x-reverse space-x-4">
+                  {tabs.map(tab => (
+                       <button
+                          key={tab.id}
+                          onClick={() => setActiveTab(tab.id)}
+                          disabled={isBusy}
+                          className={`py-3 px-2 text-sm font-medium transition-colors duration-200 border-b-2 disabled:opacity-50 ${activeTab === tab.id ? 'border-green-400 text-green-300' : 'border-transparent text-gray-400 hover:text-white'}`}
+                      >
+                          <i className={`fas ${tab.icon} ml-2`}></i>
+                          {tab.label}
+                      </button>
+                  ))}
+              </div>
+          </nav>
+        </div>
 
-        <main className="flex-grow p-6 overflow-y-auto">
+        <main className="flex-grow p-6 overflow-y-auto" style={{minHeight: 0}}>
            <div className="bg-gray-800/50 backdrop-blur-sm rounded-lg shadow-2xl shadow-black/30 ring-1 ring-white/10 p-6 h-full">
             {renderContent()}
           </div>
@@ -471,7 +539,7 @@ const App: React.FC = () => {
   return (
     <div className="h-screen w-screen overflow-hidden bg-black flex flex-col">
       <TitleBar isMaximized={isMaximized} />
-      <div className="pt-8 flex-grow flex flex-col">
+      <div className="pt-8 flex-grow flex flex-col" style={{minHeight: 0}}>
         {isAdmin === null && (
             <div className="flex-grow flex items-center justify-center">
                 <p className="text-gray-400">در حال بررسی دسترسی‌ها...</p>

@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkAdmin: (): Promise<boolean> => ipcRenderer.invoke('check-admin'),
   selectDialog: (options: OpenDialogOptions): Promise<string[]> => ipcRenderer.invoke('select-dialog', options),
   runCommand: (command: string, description: string) => ipcRenderer.send('run-command', command, description),
+  runCommandAndGetOutput: (command: string): Promise<{ stdout: string; stderr:string; code: number | null; }> => ipcRenderer.invoke('run-command-and-get-output', command),
   checkSystemRestore: (): Promise<boolean> => ipcRenderer.invoke('check-system-restore'),
   getWindowsPath: (): Promise<string> => ipcRenderer.invoke('get-windows-path'),
 

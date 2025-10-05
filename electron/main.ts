@@ -144,12 +144,24 @@ ipcMain.on('run-command', (event, command: string, description: string) => {
   });
 });
 
+ipcMain.handle('run-command-and-get-output', async (event, command: string) => {
+  return new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
+    // Using a larger buffer for potentially large driver lists
+    exec(command, { encoding: 'utf8', maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+      resolve({
+        stdout,
+        stderr,
+        code: error ? error.code ?? 1 : 0,
+      });
+    });
+  });
+});
+
 ipcMain.handle('check-system-restore', async () => {
   return new Promise<boolean>((resolve) => {
-    exec('powershell -command "Get-ComputerRestorePoint"', (error, stdout) => {
-       // A simple check: if the command runs without error and produces output,
-       // it's likely enabled. A more robust check might be needed for edge cases.
-      resolve(!error && stdout.length > 0);
+    // This command will error if the System Restore service is disabled.
+    exec('powershell -command "Get-ComputerRestorePoint"', (error) => {
+      resolve(!error);
     });
   });
 });

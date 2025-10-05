@@ -588,12 +588,12 @@ const App: React.FC = () => {
                 />
                 <label htmlFor="select-all-drivers" className="pr-2 text-sm text-gray-300 cursor-pointer">انتخاب / عدم انتخاب همه</label>
             </div>
-            <div className="flex-grow overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md mb-4 p-2">
+            <div dir="ltr" className="flex-grow overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md mb-4 p-2">
                 {drivers.length === 0 && <p className="text-gray-500 text-center p-4">برای مشاهده لیست، سیستم را اسکن کنید.</p>}
                 {drivers.map(driver => (
                     <div key={driver.publishedName} className="flex items-center p-2 rounded hover:bg-white/5 transition-colors">
                         <input type="checkbox" id={driver.publishedName} checked={selectedDrivers.has(driver.publishedName)} onChange={() => toggleDriverSelection(driver.publishedName)} />
-                        <label htmlFor={driver.publishedName} className="flex-grow cursor-pointer text-sm pr-3">
+                        <label htmlFor={driver.publishedName} className="flex-grow cursor-pointer text-sm pl-3">
                             <span className="font-bold text-gray-200">{driver.provider}</span> - <span className="text-gray-400">{driver.className} ({driver.originalName})</span>
                         </label>
                     </div>
@@ -642,13 +642,14 @@ const App: React.FC = () => {
                 />
                 <label htmlFor="select-all-backup-drivers" className="pr-2 text-sm text-gray-300 cursor-pointer">انتخاب / عدم انتخاب همه</label>
             </div>
-            <div className="flex-grow overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md mb-4 p-2">
+            <div dir="ltr" className="flex-grow overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md mb-4 p-2">
                 {driversFromBackup.length === 0 && <p className="text-gray-500 text-center p-4">یک پوشه پشتیبان را برای اسکن انتخاب کنید.</p>}
                 {driversFromBackup.map(driver => (
                     <div key={driver.id} className="flex items-center p-2 rounded hover:bg-white/5 transition-colors">
                         <input type="checkbox" id={driver.id} checked={selectedDriversFromBackup.has(driver.fullInfPath)} onChange={() => toggleBackupDriverSelection(driver.fullInfPath)} />
-                        <label htmlFor={driver.id} className="flex-grow cursor-pointer text-sm pr-3 font-mono">
-                            <span className="font-bold text-gray-200">{driver.displayName}</span>
+                        <label htmlFor={driver.id} className="flex-grow cursor-pointer text-sm pl-3 font-mono">
+                            <span className="font-bold text-gray-200 block">{driver.displayName}</span>
+                            <span className="text-gray-400 text-xs block">File: {driver.infName}</span>
                         </label>
                     </div>
                 ))}
@@ -670,14 +671,12 @@ const App: React.FC = () => {
                 <button onClick={() => navigator.clipboard.writeText(logs.map(l => `[${l.timestamp}] [${l.type}] ${l.message}`).join('\n'))} className="btn-secondary" aria-label="Copy Logs"><i className="fas fa-copy"></i></button>
                 <button onClick={() => setLogs([])} className="btn-secondary" aria-label="Clear Logs"><i className="fas fa-trash"></i></button>
             </div>
-            <div ref={logContainerRef} className="flex-grow bg-gray-900/80 rounded-lg ring-1 ring-white/10 p-4 font-mono text-xs overflow-y-auto whitespace-pre-wrap">
+            <div ref={logContainerRef} dir="ltr" className="flex-grow bg-gray-900/80 rounded-lg ring-1 ring-white/10 p-4 font-mono text-xs overflow-y-auto whitespace-pre-wrap">
                 {filteredLogs.map(log => (
-                    <div key={log.id} className="flex justify-between items-baseline gap-4 py-1" dir="rtl">
-                        <span className={`flex-grow text-right ${logTypeStyles[log.type]}`}>{log.message}</span>
-                        <div className="flex items-baseline flex-shrink-0">
-                            <span className={`w-24 flex-shrink-0 font-bold text-center ${logTypeStyles[log.type]}`}>{`[${log.type}]`}</span>
-                            <span className="text-gray-500 w-20 text-left">{log.timestamp}</span>
-                        </div>
+                    <div key={log.id} className="flex items-baseline gap-4 py-1">
+                        <span className="text-gray-500 w-20 flex-shrink-0 text-left">{log.timestamp}</span>
+                        <span className={`w-24 flex-shrink-0 font-bold text-center ${logTypeStyles[log.type]}`}>{`[${log.type}]`}</span>
+                        <span className={`flex-grow text-left ${logTypeStyles[log.type]}`}>{log.message}</span>
                     </div>
                 ))}
             </div>

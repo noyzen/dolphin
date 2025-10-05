@@ -210,6 +210,12 @@ const App: React.FC = () => {
   const [logFilter, setLogFilter] = useState('');
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [currentOperation, setCurrentOperation] = useState('');
+  const currentOperationRef = useRef('');
+
+  useEffect(() => {
+    currentOperationRef.current = currentOperation;
+  }, [currentOperation]);
+
   const [showAboutModal, setShowAboutModal] = useState(false);
 
   // Paths
@@ -285,15 +291,16 @@ const App: React.FC = () => {
       addLog(success ? 'END_SUCCESS' : 'END_ERROR', `Operation finished with exit code ${code}.`);
       setIsBusy(false);
       
-      if (currentOperation) {
+      const operationName = currentOperationRef.current;
+      if (operationName) {
           if (success) {
-              addNotification('success', 'عملیات موفق', `${currentOperation} با موفقیت به پایان رسید.`);
+              addNotification('success', 'عملیات موفق', `${operationName} با موفقیت به پایان رسید.`);
           } else {
-              addNotification('error', 'عملیات ناموفق', `${currentOperation} با خطا مواجه شد. به لاگ‌ها مراجعه کنید.`);
+              addNotification('error', 'عملیات ناموفق', `${operationName} با خطا مواجه شد. به لاگ‌ها مراجعه کنید.`);
           }
       }
       setCurrentOperation('');
-  }, [addLog, addNotification, currentOperation]);
+  }, [addLog, addNotification]);
 
   useEffect(() => {
     window.electronAPI.checkAdmin().then(setIsAdmin);

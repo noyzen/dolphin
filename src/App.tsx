@@ -154,13 +154,22 @@ const TitleBar: React.FC<{ isMaximized: boolean }> = ({ isMaximized }) => {
   );
 };
 
+const BusyIndicator: React.FC<{ operation: string }> = ({ operation }) => (
+    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-50 transition-opacity duration-300">
+        <i className="fas fa-cog fa-spin text-5xl text-green-400 mb-4"></i>
+        <p className="text-white text-lg font-medium">{operation}...</p>
+        <div className="w-48 h-2 bg-gray-700 rounded-full overflow-hidden mt-4">
+            <div className="h-full bg-gradient-to-r from-green-500 to-teal-400 animated-gradient"></div>
+        </div>
+    </div>
+);
+
 const App: React.FC = () => {
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const [activeTab, setActiveTab] = useState('full-backup');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isBusy, setIsBusy] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('به Driver Dolphin خوش آمدید! آماده برای شروع...');
   const [logFilter, setLogFilter] = useState('');
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [currentOperation, setCurrentOperation] = useState('');
@@ -182,7 +191,6 @@ const App: React.FC = () => {
   // Selective Restore
   const [selectiveRestoreFiles, setSelectiveRestoreFiles] = useState<string[]>([]);
   
-  const statusTimerRef = useRef<number | null>(null);
   const notificationIdCounter = useRef(0);
 
   const removeNotification = useCallback((id: number) => {
@@ -203,7 +211,7 @@ const App: React.FC = () => {
     window.electronAPI.checkAdmin().then(setIsAdmin);
 
     addLog('INFO', 'برنامه راه‌اندازی شد.');
-    window.electronAPI.onWindowStateChange(setIsMaximized);
+    const cleanupWindowState = window.electronAPI.onWindowStateChange(setIsMaximized);
     window.electronAPI.getWindowsPath().then(setWindowsPath);
     
     // Automatic System Restore check on startup
@@ -218,7 +226,6 @@ const App: React.FC = () => {
     
     const cleanupStart = window.electronAPI.onCommandStart((description) => {
         setIsBusy(true);
-        setStatusMessage(description + '...');
         setCurrentOperation(description);
         addLog('START', description);
     });
@@ -232,9 +239,7 @@ const App: React.FC = () => {
 
     const cleanupEnd = window.electronAPI.onCommandEnd((code) => {
         const success = code === 0;
-        const message = `عملیات پایان یافت. ${success ? 'موفقیت‌آمیز بود.' : 'با خطا خاتمه یافت.'}`;
         addLog(success ? 'END_SUCCESS' : 'END_ERROR', `فرآیند با کد خروجی ${code} پایان یافت.`);
-        setStatusMessage(message);
         setIsBusy(false);
         
         if (currentOperation) {
@@ -245,16 +250,13 @@ const App: React.FC = () => {
             }
         }
         setCurrentOperation('');
-
-        if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
-        statusTimerRef.current = window.setTimeout(() => setStatusMessage('آماده.'), 4000);
     });
     
     return () => {
+      cleanupWindowState();
       cleanupStart();
       cleanupOutput();
       cleanupEnd();
-      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
     };
   }, [currentOperation, addNotification]);
   
@@ -276,7 +278,7 @@ const App: React.FC = () => {
     const command = `powershell.exe -Command "Checkpoint-Computer -Description 'DriverDolphin Pre-Restore Point' -RestorePointType 'MODIFY_SETTINGS'"`;
     
     setIsBusy(true);
-    setStatusMessage("در حال ایجاد یک نقطه بازیابی سیستم جدید...");
+    setCurrentOperation("در حال ایجاد یک نقطه بازیابی سیستم جدید");
     addLog('START', "شروع ایجاد نقطه بازیابی سیستم");
 
     const { stdout, stderr, code } = await window.electronAPI.runCommandAndGetOutput(command);
@@ -285,11 +287,10 @@ const App: React.FC = () => {
     if (stdout) addLog('OUTPUT', stdout);
     
     const success = code === 0;
-    let message = `عملیات نقطه بازیابی پایان یافت. ${success ? 'موفقیت‌آمیز بود.' : 'با خطا خاتمه یافت.'}`;
-
+    
     const warningMessage = "one has already been created within the past 1440 minutes";
     if (success && (stdout.includes(warningMessage) || stderr.includes(warningMessage))) {
-        message = "یک نقطه بازیابی به تازگی ایجاد شده است. ویندوز اجازه ایجاد نقطه جدید را نمی‌دهد.";
+        const message = "یک نقطه بازیابی به تازگی ایجاد شده است. ویندوز اجازه ایجاد نقطه جدید را نمی‌دهد.";
         addLog('WARN', message);
         addNotification('warning', 'نقطه بازیابی', message);
     } else if (success) {
@@ -300,11 +301,8 @@ const App: React.FC = () => {
        addNotification('error', 'خطا', 'ایجاد نقطه بازیابی با خطا مواجه شد. به لاگ‌ها مراجعه کنید.');
     }
 
-    setStatusMessage(message);
     setIsBusy(false);
-
-    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
-    statusTimerRef.current = window.setTimeout(() => setStatusMessage('آماده.'), 4000);
+    setCurrentOperation('');
   };
   
   const handleFullRestore = () => {
@@ -346,13 +344,12 @@ const App: React.FC = () => {
 
   const handleScanDrivers = async () => {
     if (isBusy) return;
-    // Prepending 'chcp 65001' sets the console's code page to UTF-8 to handle various character sets.
     const command = `chcp 65001 && pnputil /enum-drivers`;
     setDrivers([]);
     setSelectedDrivers(new Set());
     
     setIsBusy(true);
-    setStatusMessage("در حال اسکن برای یافتن تمام درایورهای شخص ثالث...");
+    setCurrentOperation("در حال اسکن برای یافتن تمام درایورهای شخص ثالث");
     addLog('START', "شروع اسکن درایورهای سیستم");
 
     const { stdout, stderr, code } = await window.electronAPI.runCommandAndGetOutput(command);
@@ -368,9 +365,7 @@ const App: React.FC = () => {
     }
 
     const success = code === 0;
-    const message = `اسکن درایورها پایان یافت. ${success ? `${parsedDrivers.length} درایور یافت شد.` : 'با خطا خاتمه یافت.'}`;
     addLog(success ? 'END_SUCCESS' : 'END_ERROR', `فرآیند اسکن با کد خروجی ${code} پایان یافت.`);
-    setStatusMessage(message);
     
     if (success) {
       addNotification('success', 'اسکن کامل شد', `تعداد ${parsedDrivers.length} درایور شخص ثالث یافت شد.`);
@@ -379,9 +374,7 @@ const App: React.FC = () => {
     }
 
     setIsBusy(false);
-
-    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
-    statusTimerRef.current = window.setTimeout(() => setStatusMessage('آماده.'), 4000);
+    setCurrentOperation('');
   };
   
   const toggleDriverSelection = (publishedName: string) => {
@@ -626,10 +619,27 @@ const App: React.FC = () => {
   );
 
   const renderAppContent = () => (
-     <>
-        <div className="flex-shrink-0">
-          {isSystemRestoreEnabled === false && showRestoreWarningBanner && (
-              <div className="bg-yellow-900/50 text-yellow-200 p-3 mx-4 mt-2 rounded-md text-sm ring-1 ring-yellow-500/50 flex items-center justify-between gap-3">
+     <div className="flex flex-row-reverse h-full">
+        <aside className="w-60 flex-shrink-0 bg-gray-900/50 backdrop-blur-sm ring-1 ring-white/10 flex flex-col p-4">
+            <div className="space-y-2">
+                 {tabs.map(tab => (
+                       <button
+                          key={tab.id}
+                          onClick={() => setActiveTab(tab.id)}
+                          disabled={isBusy}
+                          className={`w-full flex items-center space-x-reverse space-x-3 p-3 rounded-md text-right text-sm font-medium transition-colors duration-200 disabled:opacity-50 group ${activeTab === tab.id ? 'bg-green-500/20 text-white shadow-inner shadow-black/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}
+                      >
+                          <i className={`fas ${tab.icon} w-6 text-center text-lg transition-colors ${activeTab === tab.id ? 'text-green-300' : 'text-gray-500 group-hover:text-gray-300'}`}></i>
+                          <span>{tab.label}</span>
+                      </button>
+                  ))}
+            </div>
+        </aside>
+
+        <main className="flex-grow p-6 relative">
+           {isBusy && <BusyIndicator operation={currentOperation} />}
+           {isSystemRestoreEnabled === false && showRestoreWarningBanner && (
+              <div className="bg-yellow-900/50 text-yellow-200 p-3 mb-4 rounded-md text-sm ring-1 ring-yellow-500/50 flex items-center justify-between gap-3">
                   <div className="flex items-start gap-3">
                     <i className="fas fa-exclamation-triangle mt-1"></i>
                     <span>System Restore غیرفعال است. قابلیت ایجاد نقطه بازیابی کار نخواهد کرد. برای فعال‌سازی به کنترل پنل ویندوز مراجعه کنید.</span>
@@ -639,47 +649,20 @@ const App: React.FC = () => {
                   </button>
               </div>
           )}
-          <nav className="px-6 border-b border-white/10">
-              <div className="flex items-center space-x-reverse space-x-4">
-                  {tabs.map(tab => (
-                       <button
-                          key={tab.id}
-                          onClick={() => setActiveTab(tab.id)}
-                          disabled={isBusy}
-                          className={`py-3 px-2 text-sm font-medium transition-colors duration-200 border-b-2 disabled:opacity-50 ${activeTab === tab.id ? 'border-green-400 text-green-300' : 'border-transparent text-gray-400 hover:text-white'}`}
-                      >
-                          <i className={`fas ${tab.icon} ml-2`}></i>
-                          {tab.label}
-                      </button>
-                  ))}
-              </div>
-          </nav>
-        </div>
-
-        <main className="flex-grow p-6 overflow-y-auto" style={{minHeight: 0}}>
-           <div className="bg-gray-800/50 backdrop-blur-sm rounded-lg shadow-2xl shadow-black/30 ring-1 ring-white/10 p-6 h-full">
+           <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl shadow-2xl shadow-black/30 ring-1 ring-white/10 p-6 h-full">
             {renderContent()}
           </div>
         </main>
-        
-        <footer className="flex-shrink-0 h-8 px-4 bg-gray-900/70 ring-1 ring-white/10 flex items-center justify-between text-sm text-gray-400">
-            <span>{statusMessage}</span>
-            {isBusy && (
-                 <div className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-green-500 to-teal-400 animated-gradient"></div>
-                </div>
-            )}
-        </footer>
-     </>
+     </div>
   );
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-black flex flex-col">
       <TitleBar isMaximized={isMaximized} />
       <NotificationContainer notifications={notifications} onDismiss={removeNotification} />
-      <div className="pt-8 flex-grow flex flex-col" style={{minHeight: 0}}>
+      <div className="pt-8 flex-grow" style={{minHeight: 0}}>
         {isAdmin === null && (
-            <div className="flex-grow flex items-center justify-center">
+            <div className="flex-grow flex items-center justify-center h-full">
                 <p className="text-gray-400">در حال بررسی دسترسی‌ها...</p>
             </div>
         )}

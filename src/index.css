@@ -42,54 +42,53 @@
   src: url('/fonts/Shabnam-Bold.woff2') format('woff2');
 }
 
-/* Base Body Styles */
+/* Base Body Styles with a futuristic grid background */
 body {
-  @apply bg-gray-900 text-gray-100 font-sans antialiased;
-  background-image: radial-gradient(circle at top left, rgba(31, 41, 55, 0.5), transparent 40%),
-                    radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.1), transparent 50%);
-  background-color: #0c0c0c;
+  @apply bg-brand-dark text-gray-200 font-sans antialiased;
+  background-color: #0a0f1a;
+  background-image: 
+    linear-gradient(rgba(0, 242, 161, 0.05) 1px, transparent 1px),
+    linear-gradient(to right, rgba(0, 242, 161, 0.05) 1px, transparent 1px);
+  background-size: 2rem 2rem;
+  background-position: center center;
 }
 
-/* Custom Animated Gradient for Headings and Progress Bars */
-.animated-gradient {
-  background-size: 200% auto;
-  animation: gradient-animation 5s ease-in-out infinite;
+/* Custom Animation for content fade-in */
+.content-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
 }
 
-@keyframes gradient-animation {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(15px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
-/* Custom Scrollbar Styles for Webkit Browsers */
+/* Custom Scrollbar Styles */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
-
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: #101828;
 }
-
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
-  border: 1px solid transparent;
-  background-clip: content-box;
+  background-color: #1d2939;
+  border-radius: 5px;
+  border: 2px solid #101828;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 255, 255, 0.4);
-}
-
-::-webkit-scrollbar-corner {
-  background: transparent;
+  background-color: #00f2a1;
 }
 
 /* Custom Checkbox Styles */
 input[type="checkbox"] {
-  @apply appearance-none h-5 w-5 bg-gray-700/50 rounded-md border border-gray-600 checked:bg-green-500 checked:border-transparent focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-green-500 transition-all duration-200 cursor-pointer;
+  @apply appearance-none h-5 w-5 bg-brand-light/50 rounded-md border border-brand-border checked:bg-brand-accent checked:border-transparent focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-brand-dark focus:ring-brand-accent transition-all duration-200 cursor-pointer;
   position: relative;
   display: inline-block;
   vertical-align: middle;
@@ -99,19 +98,38 @@ input[type="checkbox"]:checked::after {
   content: '\f00c'; /* Font Awesome check icon */
   font-family: "Font Awesome 5 Free";
   font-weight: 900;
-  @apply text-white text-xs absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2;
+  @apply text-brand-dark text-xs absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2;
 }
 
 /* Custom focus styles for buttons and inputs */
 .form-input-custom {
-    @apply w-full bg-gray-900/50 ring-1 ring-white/10 rounded-md p-2 text-gray-300 focus:outline-none focus:ring-2 focus:ring-green-500 transition-shadow focus:bg-gray-900;
+    @apply w-full bg-brand-med/70 border border-brand-border rounded-md p-2 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-accent focus:border-brand-accent focus:bg-brand-med transition-all duration-200 shadow-inner shadow-black/30;
 }
 .btn-primary {
-     @apply bg-green-600 text-white font-bold py-3 px-8 rounded-md hover:bg-green-500 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 shadow-lg shadow-green-600/20 hover:shadow-green-500/40 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-green-500;
+     @apply bg-gradient-to-r from-green-500 to-brand-accent text-white font-bold py-3 px-8 rounded-md hover:from-green-400 hover:to-green-500 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 shadow-lg shadow-brand-accent/20 hover:shadow-brand-accent/40 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-brand-dark focus:ring-brand-accent;
 }
 .btn-secondary {
-    @apply px-4 py-2 bg-gray-700/80 rounded-md hover:bg-gray-600/80 transition-colors disabled:opacity-50 shadow-md shadow-black/20 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-gray-400;
+    @apply px-4 py-2 bg-brand-light/80 text-gray-300 rounded-md border border-brand-border hover:bg-brand-light hover:text-white transition-all duration-200 disabled:opacity-50 shadow-md shadow-black/20 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-brand-dark focus:ring-gray-400;
 }
 .btn-info {
-     @apply bg-blue-600 text-white font-bold py-3 px-8 rounded-md hover:bg-blue-500 active:scale-95 transition-all disabled:opacity-50 shadow-lg shadow-blue-600/20 hover:shadow-blue-500/40 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-blue-500;
+     @apply bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-bold py-3 px-8 rounded-md hover:from-cyan-400 hover:to-blue-400 active:scale-95 transition-all duration-200 disabled:opacity-50 shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-brand-dark focus:ring-blue-500;
+}
+
+
+/* Driver list item styles */
+.driver-list-item {
+  @apply flex items-center p-2 rounded transition-colors duration-200 border-b border-white/5;
+}
+.driver-list-item:last-child {
+  @apply border-b-0;
+}
+.driver-list-item:hover {
+  @apply bg-white/5;
+}
+/* Zebra striping for lists */
+.driver-list > div:nth-child(even) {
+    @apply bg-black/20;
+}
+.driver-list > div:nth-child(even):hover {
+    @apply bg-white/10;
 }

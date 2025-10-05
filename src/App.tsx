@@ -130,11 +130,11 @@ const NotificationContainer: React.FC<{ notifications: Notification[]; onDismiss
 const AboutModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[101]" onClick={onClose}>
-        <div className="bg-gray-800 rounded-lg shadow-2xl ring-1 ring-white/10 max-w-md w-full text-center p-8 m-4" onClick={e => e.stopPropagation()}>
-            <i className="fas fa-water text-5xl text-green-400 mb-4"></i>
-            <h2 className="text-2xl font-bold text-white mb-2">Driver Dolphin</h2>
-            <p className="text-gray-400 mb-6">A modern, offline-first utility for backing up and restoring Windows drivers.</p>
-            <p className="text-xs text-gray-500 mb-6">Version 1.0.0</p>
+        <div className="bg-brand-med rounded-lg shadow-2xl ring-1 ring-brand-border max-w-md w-full text-center p-8 m-4" onClick={e => e.stopPropagation()}>
+            <i className="fas fa-water text-5xl text-brand-accent mb-4"></i>
+            <h2 className="text-2xl font-bold text-white mb-2">دلفین درایور</h2>
+            <p className="text-gray-400 mb-6">یک ابزار مدرن و آفلاین برای پشتیبان‌گیری و بازیابی درایورهای ویندوز.</p>
+            <p className="text-xs text-gray-500 mb-6">نسخه ۱.۰.۰</p>
             <button onClick={onClose} className="btn-secondary px-8">بستن</button>
         </div>
     </div>
@@ -146,19 +146,19 @@ const TitleBar: React.FC<{ isMaximized: boolean; onAboutClick: () => void; }> = 
   return (
     <div
       style={{ WebkitAppRegion: 'drag' }}
-      className="h-8 bg-gray-900/70 backdrop-blur-sm flex items-center justify-between fixed top-0 left-0 right-0 z-50 ring-1 ring-white/10"
+      className="h-8 bg-brand-dark/70 backdrop-blur-sm flex items-center justify-between fixed top-0 left-0 right-0 z-50 ring-1 ring-brand-border"
     >
       <div className="px-4 flex items-center gap-3 h-full text-gray-300 text-sm font-medium">
-        <i className="fas fa-water text-green-400"></i>
-        <span>Driver Dolphin</span>
+        <i className="fas fa-water text-brand-accent"></i>
+        <span>دلفین درایور</span>
       </div>
       <div className="flex items-center h-full">
          <button
           onClick={onAboutClick}
           style={{ WebkitAppRegion: 'no-drag' }}
           className="w-10 h-full flex items-center justify-center text-gray-400 hover:bg-white/10 hover:text-white transition-colors"
-          aria-label="About"
-          title="About Driver Dolphin"
+          aria-label="درباره"
+          title="درباره دلفین درایور"
         >
           <i className="fas fa-info-circle text-sm"></i>
         </button>
@@ -166,7 +166,7 @@ const TitleBar: React.FC<{ isMaximized: boolean; onAboutClick: () => void; }> = 
           onClick={() => window.electronAPI.minimizeWindow()}
           style={{ WebkitAppRegion: 'no-drag' }}
           className="w-10 h-full flex items-center justify-center text-gray-400 hover:bg-white/10 hover:text-white transition-colors"
-          aria-label="Minimize"
+          aria-label="کوچک‌نمایی"
         >
           <i className="fas fa-window-minimize text-xs"></i>
         </button>
@@ -174,7 +174,7 @@ const TitleBar: React.FC<{ isMaximized: boolean; onAboutClick: () => void; }> = 
           onClick={() => window.electronAPI.toggleMaximizeWindow()}
           style={{ WebkitAppRegion: 'no-drag' }}
           className="w-10 h-full flex items-center justify-center text-gray-400 hover:bg-white/10 hover:text-white transition-colors"
-          aria-label={isMaximized ? "Restore" : "Maximize"}
+          aria-label={isMaximized ? "بازگردانی" : "بزرگ‌نمایی"}
         >
           <i className={`fas ${isMaximized ? 'fa-window-restore' : 'fa-window-maximize'} text-xs`}></i>
         </button>
@@ -182,7 +182,7 @@ const TitleBar: React.FC<{ isMaximized: boolean; onAboutClick: () => void; }> = 
           onClick={() => window.electronAPI.closeWindow()}
           style={{ WebkitAppRegion: 'no-drag' }}
           className="w-10 h-full flex items-center justify-center text-gray-400 hover:bg-red-500 hover:text-white transition-colors"
-          aria-label="Close"
+          aria-label="بستن"
         >
           <i className="fas fa-times text-sm"></i>
         </button>
@@ -193,7 +193,7 @@ const TitleBar: React.FC<{ isMaximized: boolean; onAboutClick: () => void; }> = 
 
 const BusyIndicator: React.FC<{ operation: string }> = ({ operation }) => (
     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-50 transition-opacity duration-300">
-        <i className="fas fa-cog fa-spin text-5xl text-green-400 mb-4"></i>
+        <i className="fas fa-cog fa-spin text-5xl text-brand-accent mb-4"></i>
         <p className="text-white text-lg font-medium">{operation}...</p>
         <div className="w-48 h-2 bg-gray-700 rounded-full overflow-hidden mt-4">
             <div className="h-full bg-gradient-to-r from-green-500 to-teal-400 animated-gradient"></div>
@@ -641,11 +641,11 @@ const App: React.FC = () => {
                     <span className="pr-4 mr-auto text-gray-400">نمایش {filteredDrivers.length} از {drivers.length} درایور</span>
                 </div>
             </div>
-            <div dir="ltr" className="flex-grow overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md p-2">
+            <div dir="ltr" className="driver-list flex-grow overflow-y-auto bg-brand-med/50 ring-1 ring-brand-border rounded-md p-1">
                 {drivers.length > 0 && filteredDrivers.length === 0 && <p className="text-gray-500 text-center p-4">هیچ درایوری با عبارت جستجو شده مطابقت ندارد.</p>}
                 {drivers.length === 0 && <p className="text-gray-500 text-center p-4">برای مشاهده لیست، سیستم را اسکن کنید.</p>}
                 {filteredDrivers.map(driver => (
-                    <div key={driver.publishedName} className="flex items-center p-2 rounded hover:bg-white/5 transition-colors">
+                    <div key={driver.publishedName} className="driver-list-item">
                         <input type="checkbox" id={driver.publishedName} checked={selectedDrivers.has(driver.publishedName)} onChange={() => toggleDriverSelection(driver.publishedName)} />
                         <label htmlFor={driver.publishedName} className="flex-grow cursor-pointer text-sm pl-3">
                             <span className="font-bold text-gray-200 block">{driver.provider} - {driver.className}</span>
@@ -685,7 +685,7 @@ const App: React.FC = () => {
                             setPersistedSelectiveRestoreFolder(path);
                             scanBackupFolder(path);
                         });
-                    }} disabled={isBusy} className="btn-secondary flex-shrink-0" title="انتخاب و اسکن پوشه"><i className="fas fa-folder-search"></i></button>
+                    }} disabled={isBusy} className="btn-secondary flex-shrink-0" title="انتخاب و اسکن پوشه"><i className="fas fa-search-location"></i></button>
                 </div>
                 <div className="relative mb-2">
                     <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"></i>
@@ -703,11 +703,11 @@ const App: React.FC = () => {
                     <span className="pr-4 mr-auto text-gray-400">نمایش {filteredDriversFromBackup.length} از {driversFromBackup.length} درایور</span>
                 </div>
             </div>
-            <div dir="ltr" className="flex-grow overflow-y-auto bg-gray-900/50 ring-1 ring-white/10 rounded-md p-2">
+            <div dir="ltr" className="driver-list flex-grow overflow-y-auto bg-brand-med/50 ring-1 ring-brand-border rounded-md p-1">
                 {driversFromBackup.length > 0 && filteredDriversFromBackup.length === 0 && <p className="text-gray-500 text-center p-4">هیچ درایوری با عبارت جستجو شده مطابقت ندارد.</p>}
                 {driversFromBackup.length === 0 && <p className="text-gray-500 text-center p-4">یک پوشه پشتیبان را برای اسکن انتخاب کنید.</p>}
                 {filteredDriversFromBackup.map(driver => (
-                    <div key={driver.id} className="flex items-center p-2 rounded hover:bg-white/5 transition-colors">
+                    <div key={driver.id} className="driver-list-item">
                         <input type="checkbox" id={driver.id} checked={selectedDriversFromBackup.has(driver.fullInfPath)} onChange={() => toggleBackupDriverSelection(driver.fullInfPath)} />
                         <label htmlFor={driver.id} className="flex-grow cursor-pointer text-sm pl-3 font-mono">
                             <span className="font-bold text-gray-200 block">{driver.displayName}</span>
@@ -732,7 +732,7 @@ const App: React.FC = () => {
                 <button onClick={() => navigator.clipboard.writeText(logs.map(l => `[${l.timestamp}] [${l.type}] ${l.message}`).join('\n'))} className="btn-secondary" title="کپی کردن لاگ‌ها"><i className="fas fa-copy"></i></button>
                 <button onClick={() => setLogs([])} className="btn-secondary" title="پاک کردن لاگ‌ها"><i className="fas fa-trash"></i></button>
             </div>
-            <div ref={logContainerRef} dir="ltr" className="flex-grow bg-gray-900/80 rounded-lg ring-1 ring-white/10 p-4 font-mono text-xs overflow-y-auto whitespace-pre-wrap">
+            <div ref={logContainerRef} dir="ltr" className="flex-grow bg-brand-dark/80 rounded-lg ring-1 ring-brand-border p-4 font-mono text-xs overflow-y-auto whitespace-pre-wrap">
                 {filteredLogs.map(log => (
                     <div key={log.id} className="flex items-baseline gap-4 py-1">
                         <span className="text-gray-500 w-20 flex-shrink-0 text-left">{log.timestamp}</span>
@@ -749,17 +749,17 @@ const App: React.FC = () => {
   
   const renderAdminGate = () => (
     <div className="flex-grow flex items-center justify-center p-8 text-center">
-        <div className="bg-gray-800/50 ring-1 ring-red-500/30 rounded-lg p-10 max-w-lg">
+        <div className="bg-brand-med/50 ring-1 ring-red-500/30 rounded-lg p-10 max-w-lg">
             <i className="fas fa-user-shield text-5xl text-red-400 mb-6"></i>
             <h1 className="text-3xl font-bold text-red-300 mb-4">نیاز به دسترسی مدیر</h1>
-            <p className="text-gray-300 mb-8">برنامه Driver Dolphin برای مدیریت درایورهای سیستمی نیاز به اجرا با دسترسی مدیر (Administrator) دارد. لطفاً برنامه را با دسترسی مناسب مجدداً اجرا کنید.</p>
-            <div className="text-right bg-gray-900/70 p-6 rounded-md ring-1 ring-white/10">
+            <p className="text-gray-300 mb-8">برنامه دلفین درایور برای مدیریت درایورهای سیستمی نیاز به اجرا با دسترسی مدیر (Administrator) دارد. لطفاً برنامه را با دسترسی مناسب مجدداً اجرا کنید.</p>
+            <div className="text-right bg-brand-dark/70 p-6 rounded-md ring-1 ring-brand-border">
                 <h2 className="font-bold text-lg text-gray-100 mb-4">چگونه به عنوان مدیر اجرا کنیم:</h2>
                 <ol className="list-decimal list-inside space-y-3 text-gray-300">
                     <li>این پنجره را ببندید.</li>
-                    <li>فایل اجرایی یا میان‌بر برنامه <strong className="text-green-400">Driver Dolphin</strong> را پیدا کنید.</li>
-                    <li>روی آیکن برنامه <strong className="text-green-400">راست‌کلیک</strong> کنید.</li>
-                    <li>از منوی باز شده گزینه <strong className="text-green-400">"Run as administrator"</strong> را انتخاب کنید.</li>
+                    <li>فایل اجرایی یا میان‌بر برنامه <strong className="text-brand-accent">دلفین درایور</strong> را پیدا کنید.</li>
+                    <li>روی آیکن برنامه <strong className="text-brand-accent">راست‌کلیک</strong> کنید.</li>
+                    <li>از منوی باز شده گزینه <strong className="text-brand-accent">"Run as administrator"</strong> را انتخاب کنید.</li>
                 </ol>
             </div>
         </div>
@@ -768,16 +768,23 @@ const App: React.FC = () => {
 
   const renderAppContent = () => (
      <div className="flex flex-col h-full">
-        <nav className="flex-shrink-0 flex items-center space-x-reverse space-x-1 border-b border-white/10 px-4 bg-gray-900/50 backdrop-blur-sm">
+        <nav className="flex-shrink-0 flex items-center justify-center border-b border-brand-border bg-brand-med/50 backdrop-blur-sm">
              {tabs.map(tab => (
                    <button
                       key={tab.id}
                       onClick={() => setActiveTab(tab.id)}
                       disabled={isBusy}
-                      className={`flex items-center space-x-reverse space-x-2 p-3 text-sm font-medium transition-colors duration-200 disabled:opacity-50 border-b-2 ${activeTab === tab.id ? 'border-green-400 text-white' : 'border-transparent text-gray-400 hover:bg-white/5 hover:text-white'}`}
+                      className={`relative flex items-center space-x-reverse space-x-2 p-4 text-sm font-medium transition-all duration-300 disabled:opacity-50 outline-none focus:outline-none ${
+                        activeTab === tab.id
+                            ? 'text-brand-accent'
+                            : 'text-gray-400 hover:text-white'
+                      }`}
                   >
-                      <i className={`fas ${tab.icon} w-5 text-center ${activeTab === tab.id ? 'text-green-300' : 'text-gray-500'}`}></i>
+                      <i className={`fas ${tab.icon} w-5 text-center text-lg`}></i>
                       <span>{tab.label}</span>
+                      {activeTab === tab.id && (
+                        <span className="absolute bottom-0 right-0 left-0 h-1 bg-brand-accent rounded-t-full shadow-[0_0_10px_theme(colors.brand.accent)]"></span>
+                      )}
                   </button>
               ))}
         </nav>
@@ -795,7 +802,7 @@ const App: React.FC = () => {
                   </button>
               </div>
           )}
-           <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl shadow-2xl shadow-black/30 ring-1 ring-white/10 p-6 h-full">
+           <div key={activeTab} className="content-fade-in bg-brand-med/60 backdrop-blur-sm rounded-xl shadow-2xl shadow-black/50 ring-1 ring-brand-border p-6 h-full">
             {renderContent()}
           </div>
         </main>

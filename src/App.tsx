@@ -1,12 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { OpenDialogOptions } from 'electron';
 
-declare module 'react' {
-  interface CSSProperties {
-    WebkitAppRegion?: 'drag' | 'no-drag';
-  }
-}
-
 // Type definitions
 interface DriverInfo {
   publishedName: string;

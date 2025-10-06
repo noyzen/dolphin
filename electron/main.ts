@@ -255,7 +255,7 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                         };
 
                         $versionSection.Split([System.Environment]::NewLine) | ForEach-Object {
-                            if ($_ -match '^\\s*Provider\\s*=\\s*(.*)$') {
+                            if ($_ -imatch '^\\s*Provider\\s*=\\s*(.*)$') {
                                 $val = $Matches[1].Trim().Trim('"');
                                 if ($val.StartsWith('%') -and $val.EndsWith('%')) {
                                     $key = $val.Substring(1, $val.Length - 2);
@@ -268,10 +268,10 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                                     $props.provider = $val;
                                 }
                             }
-                            elseif ($_ -match '^\\s*Class\\s*=\\s*(.*)$') {
+                            elseif ($_ -imatch '^\\s*Class\\s*=\\s*(.*)$') {
                                 $props.className = $Matches[1].Trim().Trim('"');
                             }
-                            elseif ($_ -match '^\\s*DriverVer\\s*=\\s*.*?\\,\\s*([\\d\\.]+)$') {
+                            elseif ($_ -imatch '^\\s*DriverVer\\s*=\\s*.*?\\,\\s*([\\d\\.]+)$') {
                                 $props.version = $Matches[1].Trim();
                             }
                         };

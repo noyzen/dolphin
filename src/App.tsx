@@ -19,6 +19,9 @@ interface DriverFromBackup {
   className?: string;
   version?: string;
   parsingError?: string;
+  backupOS?: string;
+  backupDate?: string;
+  backupOSBuild?: string;
 }
 
 type LogType = 'START' | 'OUTPUT' | 'END_SUCCESS' | 'END_ERROR' | 'INFO' | 'WARN';
@@ -52,6 +55,11 @@ interface ConfirmationState {
   onResolve: (buttonIndex: number) => void;
 }
 
+interface OsInfo {
+    OsProductName: string;
+    OsBuildNumber: string;
+}
+
 
 declare global {
   interface Window {
@@ -66,11 +74,14 @@ declare global {
       runCommandAndGetOutput: (command: string) => Promise<{ stdout: string; stderr: string; code: number | null }>;
       checkSystemRestore: () => Promise<boolean>;
       getWindowsPath: () => Promise<string>;
+      getOsInfo: () => Promise<OsInfo>;
       getSetting: (key: string) => Promise<any>;
       setSetting: (key: string, value: any) => void;
       validatePath: (path: string) => Promise<boolean>;
       scanBackupFolder: (folderPath: string) => Promise<{ drivers: DriverFromBackup[], errors: string[] }>;
       isFolderEmpty: (folderPath: string) => Promise<boolean>;
+      doFullBackup: (backupPath: string) => void;
+      doSelectiveBackup: (options: { selectedDrivers: DriverInfo[], destinationPath: string }) => void;
       onCommandStart: (callback: (description: string) => void) => () => void;
       onCommandOutput: (callback: (output: string) => void) => () => void;
       onCommandEnd: (callback: (code: number | null) => void) => () => void;
@@ -287,6 +298,7 @@ const App: React.FC = () => {
   // System state
   const [isSystemRestoreEnabled, setIsSystemRestoreEnabled] = useState<boolean | null>(null);
   const [showRestoreWarningBanner, setShowRestoreWarningBanner] = useState(true);
+  const [currentOsInfo, setCurrentOsInfo] = useState<OsInfo | null>(null);
 
   // Selective Backup
   const [drivers, setDrivers] = useState<DriverInfo[]>([]);
@@ -462,6 +474,7 @@ const App: React.FC = () => {
     addLog('INFO', 'Application initialized.');
     const cleanupWindowState = window.electronAPI.onWindowStateChange(setIsMaximized);
     window.electronAPI.getWindowsPath().then(setWindowsPath);
+    window.electronAPI.getOsInfo().then(setCurrentOsInfo);
 
     const validateAndSetPath = async (key: string, setter: React.Dispatch<React.SetStateAction<string>>, scanCallback?: (path: string) => void) => {
         const path = await window.electronAPI.getSetting(key) || '';
@@ -547,8 +560,7 @@ const App: React.FC = () => {
   const handleFullBackup = async () => {
     if (!backupPath || isBusy) return;
     if (!(await confirmNonEmptyFolder(backupPath))) return;
-    const command = `dism /online /export-driver /destination:"${backupPath}"`;
-    window.electronAPI.runCommand(command, "در حال پشتیبان‌گیری از تمام درایورهای نصب شده");
+    window.electronAPI.doFullBackup(backupPath);
   };
 
   const handleCreateRestorePoint = async () => {
@@ -558,38 +570,76 @@ const App: React.FC = () => {
   };
 
   const handleRestoreProcess = async (driversToRestore: DriverFromBackup[]) => {
-      const command = `powershell -NoProfile -ExecutionPolicy Bypass -Command "@(Get-WindowsDriver -Online | Select-Object @{n='publishedName';e={$_.Driver}}, @{n='originalName';e={$_.OriginalFileName}}, @{n='provider';e={$_.ProviderName}}, @{n='className';e={$_.ClassName}}, @{n='version';e={$_.DriverVersion}}) | ConvertTo-Json"`;
-      addLog('INFO', 'Scanning currently installed drivers for comparison.');
-      setCurrentOperation("در حال بررسی درایورهای نصب شده...");
-      setIsBusy(true);
+      const getInstalledDrivers = async (): Promise<DriverInfo[]> => {
+          const command = `powershell -NoProfile -ExecutionPolicy Bypass -Command "@(Get-WindowsDriver -Online | Select-Object @{n='publishedName';e={$_.Driver}}, @{n='originalName';e={$_.OriginalFileName}}, @{n='provider';e={$_.ProviderName}}, @{n='className';e={$_.ClassName}}, @{n='version';e={$_.DriverVersion}}) | ConvertTo-Json"`;
+          addLog('INFO', 'Scanning currently installed drivers for comparison.');
+          setCurrentOperation("در حال بررسی درایورهای نصب شده...");
+          setIsBusy(true);
 
-      const { stdout, code } = await window.electronAPI.runCommandAndGetOutput(command);
-      if (code !== 0 || !stdout.trim()) {
-          addLog('END_ERROR', 'Failed to get list of installed drivers.');
-          addNotification('error', 'خطا', 'لیست درایورهای نصب شده برای مقایسه دریافت نشد.');
+          const { stdout, code } = await window.electronAPI.runCommandAndGetOutput(command);
+          if (code !== 0 || !stdout.trim()) {
+              addLog('END_ERROR', 'Failed to get list of installed drivers.');
+              addNotification('error', 'خطا', 'لیست درایورهای نصب شده برای مقایسه دریافت نشد.');
+              return [];
+          }
+          try {
+              return JSON.parse(stdout.trim());
+          } catch (e) {
+              addLog('END_ERROR', 'Failed to parse list of installed drivers.');
+              addNotification('error', 'خطا', 'Parsing installed driver list failed.');
+              return [];
+          }
+      };
+
+      const installedDrivers = await getInstalledDrivers();
+      if (installedDrivers.length === 0 && driversToRestore.length > 0) {
           setIsBusy(false);
           setCurrentOperation('');
           return;
       }
 
-      let installedDrivers: DriverInfo[] = [];
-      try {
-        installedDrivers = JSON.parse(stdout.trim());
-      } catch (e) {
-        addLog('END_ERROR', 'Failed to parse list of installed drivers.');
-        addNotification('error', 'خطا', 'Parsing installed driver list failed.');
-        setIsBusy(false);
-        setCurrentOperation('');
-        return;
-      }
-
       const driversToInstallPaths = new Set<string>();
       let installAllConfirmed = false;
+      let crossVersionInstallAllConfirmed = false;
+
+      const getOsMajorVersion = (osName: string = ''): string => {
+        if (osName.includes('Windows 11')) return 'Windows 11';
+        if (osName.includes('Windows 10')) return 'Windows 10';
+        return osName;
+      };
 
       for (const backupDriver of driversToRestore) {
-          const existingDriver = installedDrivers.find(
-              (d) => d.originalName.toLowerCase() === backupDriver.infName.toLowerCase()
-          );
+          // Cross-OS version check
+          if (currentOsInfo && backupDriver.backupOS && !crossVersionInstallAllConfirmed) {
+              const currentMajor = getOsMajorVersion(currentOsInfo.OsProductName);
+              const backupMajor = getOsMajorVersion(backupDriver.backupOS);
+              if (currentMajor && backupMajor && currentMajor !== backupMajor) {
+                  setCurrentOperation(`در انتظار تایید کاربر برای ${backupDriver.displayName}`);
+                  const response = await requestConfirmation({
+                      type: 'warning',
+                      title: 'عدم تطابق نسخه ویندوز',
+                      message: `درایور انتخاب شده از نسخه دیگری از ویندوز پشتیبان‌گیری شده است. نصب آن ممکن است باعث ناپایداری سیستم شود.`,
+                      detail: `ویندوز فعلی: ${currentOsInfo.OsProductName}\n` +
+                              `ویندوز پشتیبان: ${backupDriver.backupOS}\n\n` +
+                              `آیا می‌خواهید با مسئولیت خودتان ادامه دهید؟`,
+                      buttons: ['نصب این مورد', 'رد شدن', 'نصب همه موارد باقی‌مانده', 'لغو عملیات'],
+                  });
+                  if (response === 0) { // Install this
+                      // continue to next check
+                  } else if (response === 1) { // Skip
+                      addLog('INFO', `User skipped cross-OS restore for driver: ${backupDriver.displayName}`);
+                      continue; // Skip to next driver in loop
+                  } else if (response === 2) { // Install All
+                      crossVersionInstallAllConfirmed = true;
+                  } else if (response === 3) { // Cancel
+                      addLog('INFO', 'Restore operation cancelled by user due to OS mismatch.');
+                      addNotification('info', 'لغو شد', 'عملیات بازیابی توسط کاربر لغو شد.');
+                      setIsBusy(false); setCurrentOperation(''); return;
+                  }
+              }
+          }
+          
+          const existingDriver = installedDrivers.find(d => d.originalName.toLowerCase() === backupDriver.infName.toLowerCase());
 
           if (existingDriver && !installAllConfirmed) {
               setCurrentOperation(`در انتظار تایید کاربر برای ${backupDriver.displayName}`);
@@ -603,22 +653,15 @@ const App: React.FC = () => {
                   buttons: ['نصب', 'رد شدن', 'نصب همه موارد باقی‌مانده', 'لغو عملیات'],
               });
 
-              if (response === 0) { // Install
-                  driversToInstallPaths.add(backupDriver.fullInfPath);
-              } else if (response === 1) { // Skip
-                  addLog('INFO', `User skipped reinstalling driver: ${backupDriver.displayName}`);
-              } else if (response === 2) { // Install All
-                  installAllConfirmed = true;
-                  driversToInstallPaths.add(backupDriver.fullInfPath);
-              } else if (response === 3) { // Cancel
+              if (response === 0) { driversToInstallPaths.add(backupDriver.fullInfPath); } 
+              else if (response === 1) { addLog('INFO', `User skipped reinstalling driver: ${backupDriver.displayName}`); } 
+              else if (response === 2) { installAllConfirmed = true; driversToInstallPaths.add(backupDriver.fullInfPath); } 
+              else if (response === 3) {
                   addLog('INFO', 'Restore operation cancelled by user.');
                   addNotification('info', 'لغو شد', 'عملیات بازیابی توسط کاربر لغو شد.');
-                  setIsBusy(false);
-                  setCurrentOperation('');
-                  return;
+                  setIsBusy(false); setCurrentOperation(''); return;
               }
           } else {
-              // If no existing driver found, or if user chose "Install All", add to list
               driversToInstallPaths.add(backupDriver.fullInfPath);
           }
       }
@@ -751,43 +794,16 @@ const App: React.FC = () => {
       if(selectedDrivers.size === 0 || !selectiveBackupPath || isBusy) return;
       if (!(await confirmNonEmptyFolder(selectiveBackupPath))) return;
 
-      const getBaseName = (filePath: string) => {
-          if (!filePath) return '';
-          const pathSeparator = filePath.includes('\\') ? '\\' : '/';
-          return filePath.substring(filePath.lastIndexOf(pathSeparator) + 1);
-      };
-
       const selectedDriverInfo = drivers.filter(d => selectedDrivers.has(d.publishedName));
-      const infNames = selectedDriverInfo.map(d => getBaseName(d.originalName).replace('.inf', ''));
-      
-      if (infNames.length === 0) {
-        addNotification('warning', 'درایور معتبری انتخاب نشده', 'نام فایل برای درایورهای انتخاب شده شناسایی نشد.');
+      if (selectedDriverInfo.length === 0) {
+        addNotification('warning', 'درایور معتبری انتخاب نشده', 'هیچ درایوری برای پشتیبان‌گیری انتخاب نشده است.');
         return;
       }
       
-      const fileRepoPath = `${windowsPath}\\System32\\DriverStore\\FileRepository`;
-      
-      // A more specific filter to avoid matching similar names (e.g., driver vs driver_ext)
-      const whereClauses = infNames.map(n => `($_.Name -like '${n}.inf_*')`).join(' -or ');
-
-      const psCommand = `
-        $dest = '${selectiveBackupPath}';
-        $sourcePath = '${fileRepoPath}';
-        $driverFolders = Get-ChildItem -Path $sourcePath -Directory | Where-Object { ${whereClauses} };
-        if ($null -eq $driverFolders) {
-            Write-Host "No matching driver packages found in FileRepository to copy."
-        } else {
-            $driverFolders | ForEach-Object { 
-                Write-Host "Copying driver package: $($_.Name)";
-                Copy-Item -Path $_.FullName -Destination $dest -Recurse -Container -Force -Confirm:$false 
-            }
-        }
-      `;
-      
-      // Clean up the command string for execution
-      const command = `powershell -NoProfile -ExecutionPolicy Bypass -Command "${psCommand.replace(/\r?\n|\r/g, ' ').replace(/\s\s+/g, ' ').trim()}"`;
-      
-      window.electronAPI.runCommand(command, `در حال پشتیبان‌گیری از ${selectedDrivers.size} درایور انتخاب شده`);
+      window.electronAPI.doSelectiveBackup({ 
+          selectedDrivers: selectedDriverInfo, 
+          destinationPath: selectiveBackupPath 
+      });
   };
   
   const handleSelectiveRestore = () => {
@@ -815,7 +831,8 @@ const App: React.FC = () => {
         driver.displayName.toLowerCase().includes(lowercasedFilter) ||
         (driver.infName && driver.infName.toLowerCase().includes(lowercasedFilter)) ||
         (driver.provider && driver.provider.toLowerCase().includes(lowercasedFilter)) ||
-        (driver.version && driver.version.toLowerCase().includes(lowercasedFilter))
+        (driver.version && driver.version.toLowerCase().includes(lowercasedFilter)) ||
+        (driver.backupOS && driver.backupOS.toLowerCase().includes(lowercasedFilter))
     );
   }, [driversFromBackup, selectiveRestoreSearch]);
   
@@ -867,7 +884,7 @@ const App: React.FC = () => {
         return (
           <div className="flex flex-col h-full">
             <h2 className="text-2xl font-bold mb-4 text-gray-200">پشتیبان‌گیری کامل از درایورها</h2>
-            <p className="text-gray-400 mb-6">از تمام درایورهای نصب شده (غیر پیش‌فرض ویندوز) در یک پوشه پشتیبان تهیه کنید تا بتوانید بعداً آن‌ها را بازیابی کنید.</p>
+            <p className="text-gray-400 mb-6">از تمام درایورهای نصب شده (غیر پیش‌فرض ویندوز) در یک پوشه پشتیبان تهیه کنید تا بتوانید بعداً آن‌ها را بازیابی کنید. جزئیات نسخه ویندوز فعلی نیز برای هر درایور ذخیره خواهد شد.</p>
             <div className="flex items-center space-x-reverse space-x-2 mb-6">
                 <input type="text" readOnly value={backupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
                 <button onClick={() => handleSelectFolder(setPersistedBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0" title="انتخاب پوشه"><i className="fas fa-folder-open"></i></button>
@@ -1006,6 +1023,12 @@ const App: React.FC = () => {
                                 {driver.version && driver.version !== 'N/A' && `Version: ${driver.version} `}
                                 ({driver.infName})
                             </span>
+                             {driver.backupOS && (
+                                <div className="mt-1 text-xs bg-brand-light/50 text-cyan-300 rounded-full px-2 py-0.5 inline-block">
+                                    <i className="fab fa-windows mr-1.5"></i> {driver.backupOS}
+                                    {driver.backupDate && ` - ${new Date(driver.backupDate).toLocaleDateString('fa-IR')}`}
+                                </div>
+                            )}
                         </label>
                     </div>
                 ))}

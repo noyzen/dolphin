@@ -19,15 +19,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   runCommandAndGetOutput: (command: string): Promise<{ stdout: string; stderr:string; code: number | null; }> => ipcRenderer.invoke('run-command-and-get-output', command),
   checkSystemRestore: (): Promise<boolean> => ipcRenderer.invoke('check-system-restore'),
   getWindowsPath: (): Promise<string> => ipcRenderer.invoke('get-windows-path'),
+  getOsInfo: (): Promise<{ OsProductName: string, OsBuildNumber: string }> => ipcRenderer.invoke('get-os-info'),
   
   // Settings Persistence
   getSetting: (key: string): Promise<any> => ipcRenderer.invoke('get-setting', key),
   setSetting: (key: string, value: any) => ipcRenderer.send('set-setting', { key, value }),
   validatePath: (path: string): Promise<boolean> => ipcRenderer.invoke('validate-path', path),
 
-  // Selective restore and backup helpers
+  // Backup/Restore helpers
   scanBackupFolder: (folderPath: string): Promise<{ drivers: any[], errors: string[] }> => ipcRenderer.invoke('scan-backup-folder', folderPath),
   isFolderEmpty: (folderPath: string): Promise<boolean> => ipcRenderer.invoke('is-folder-empty', folderPath),
+  doFullBackup: (backupPath: string) => ipcRenderer.send('do-full-backup', backupPath),
+  doSelectiveBackup: (options: { selectedDrivers: any[], destinationPath: string }) => ipcRenderer.send('do-selective-backup', options),
+
 
   // Command output listeners
   onCommandStart: (callback: (description: string) => void) => {

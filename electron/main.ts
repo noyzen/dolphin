@@ -134,7 +134,7 @@ ipcMain.handle('select-dialog', async (event, options: Electron.OpenDialogOption
   return result.filePaths;
 });
 
-
+// Simple command runner for single-line operations
 ipcMain.on('run-command', (event, command: string, description: string) => {
   const webContents = event.sender;
   webContents.send('command-start', description);
@@ -153,6 +153,7 @@ ipcMain.on('run-command', (event, command: string, description: string) => {
     webContents.send('command-end', code);
   });
 });
+
 
 ipcMain.handle('run-command-and-get-output', async (event, command: string) => {
   return new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
@@ -213,12 +214,9 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
             $RootPath = '${escapedFolderPath}'
             
             try {
-                # Ensure we only get files, not directories that happen to match the *.inf filter.
                 $infFiles = Get-ChildItem -Path $RootPath -Recurse -Filter *.inf -ErrorAction Stop | Where-Object { -not $_.PSIsContainer };
             } catch {
-                # This block catches errors from Get-ChildItem, like if the directory doesn't exist
                 Write-Output "[]"
-                # Use Write-Error to communicate the problem back to the stderr stream
                 Write-Error "Failed to read directory '$RootPath': $_.Exception.Message"
                 exit 1
             }
@@ -227,7 +225,6 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
             foreach ($infFile in $infFiles) {
                 $infPath = $infFile.FullName
                 try {
-                    # Attempt to read with auto-detection; this is more robust than forcing an encoding.
                     $infContent = Get-Content -Path $infPath -ErrorAction Stop -Raw;
                     $strings = @{};
                     
@@ -237,11 +234,21 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                             if ($_ -match '^\\s*([^;=\\s]+)\\s*=\\s*(.*)$') {
                                 $key = $Matches[1].Trim()
                                 $value = $Matches[2].Trim().Trim('"')
-                                if ($key) {
-                                    $strings[$key] = $value
-                                }
+                                if ($key) { $strings[$key] = $value }
                             }
                         };
+                    }
+
+                    # Read driver_details.txt
+                    $detailsPath = Join-Path -Path $infFile.DirectoryName -ChildPath 'driver_details.txt'
+                    $details = @{ backupOS = ''; backupDate = ''; backupOSBuild = '' }
+                    if (Test-Path $detailsPath) {
+                        try {
+                            $detailsContent = Get-Content $detailsPath -Raw
+                            if ($detailsContent -match 'BackupOS:\\s*(.*)') { $details.backupOS = $Matches[1].Trim() }
+                            if ($detailsContent -match 'BackupDate:\\s*(.*)') { $details.backupDate = $Matches[1].Trim() }
+                            if ($detailsContent -match 'BackupOSBuild:\\s*(.*)') { $details.backupOSBuild = $Matches[1].Trim() }
+                        } catch {} # Silently ignore if details file is unreadable
                     }
                     
                     if ($infContent -match '(?msi)\\[Version\\]\\s*\\r?\\n(.*?)(?:\\r?\\n\\[|$)') {
@@ -252,6 +259,9 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                             version = '';
                             originalName = (Split-Path $infPath -Leaf);
                             fullInfPath = $infPath;
+                            backupOS = $details.backupOS;
+                            backupDate = $details.backupDate;
+                            backupOSBuild = $details.backupOSBuild;
                         };
 
                         $versionSection -split '\\r?\\n' | ForEach-Object {
@@ -259,137 +269,66 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                                 $val = $Matches[1].Trim().Trim('"');
                                 if ($val.StartsWith('%') -and $val.EndsWith('%')) {
                                     $key = $val.Substring(1, $val.Length - 2);
-                                    if ($strings.ContainsKey($key)) {
-                                        $props.provider = $strings[$key];
-                                    } else {
-                                        $props.provider = $key;
-                                    }
-                                } else {
-                                    $props.provider = $val;
-                                }
+                                    if ($strings.ContainsKey($key)) { $props.provider = $strings[$key] } else { $props.provider = $key }
+                                } else { $props.provider = $val }
                             }
-                            elseif ($_ -imatch '^\\s*Class\\s*=\\s*(.*)$') {
-                                $props.className = $Matches[1].Trim().Trim('"');
-                            }
+                            elseif ($_ -imatch '^\\s*Class\\s*=\\s*(.*)$') { $props.className = $Matches[1].Trim().Trim('"') }
                             elseif ($_ -imatch '^\\s*DriverVer\\s*=\\s*(.*)$') {
                                 $fullVerLine = $Matches[1].Trim().Trim('"');
-                                # Use a more robust regex to find the version string, which is typically a series of numbers and dots.
-                                # This avoids issues with date formats or comma separators.
-                                if ($fullVerLine -match '([0-9]+\\.[0-9]+(\\.[0-9]+)*)$') {
-                                    $props.version = $Matches[1].Trim()
-                                }
-                                elseif ($fullVerLine.Contains(',')) {
-                                    # Fallback for formats like "Date,Version"
-                                    $props.version = $fullVerLine.Split(',')[-1].Trim();
-                                }
-                                else {
-                                    # If all else fails, take the whole line
-                                    $props.version = $fullVerLine;
-                                }
+                                if ($fullVerLine -match '([0-9]+\\.[0-9]+(\\.[0-9]+)*)$') { $props.version = $Matches[1].Trim() }
+                                elseif ($fullVerLine.Contains(',')) { $props.version = $fullVerLine.Split(',')[-1].Trim() }
+                                else { $props.version = $fullVerLine }
                             }
                         };
-
-                        # Be lenient: add the driver even if some properties are missing.
-                        # The UI will handle displaying what's available. A true parsing error
-                        # (like a missing [Version] section) is handled in the 'else' below.
                         $allDrivers += New-Object psobject -Property $props;
-                        
                     } else {
                          $errorRecord = @{ isError = $true; infPath = $infPath; message = "Could not find [Version] section." }
                          $allDrivers += New-Object psobject -Property $errorRecord
                     }
-
                 } catch {
-                    # Report errors as a special object instead of silently failing.
-                    $errorRecord = @{
-                        isError = $true;
-                        infPath = $infPath;
-                        message = $_.Exception.Message;
-                    }
+                    $errorRecord = @{ isError = $true; infPath = $infPath; message = $_.Exception.Message }
                     $allDrivers += New-Object psobject -Property $errorRecord;
                 }
             }
             $allDrivers | ConvertTo-Json -Compress
         `;
 
-        // Use spawn and pipe the script to stdin to avoid command length limits and temp file issues.
-        const ps = spawn('powershell.exe', [
-            '-NoProfile',
-            '-ExecutionPolicy', 'Bypass',
-            '-Command', '-' // Read from stdin
-        ]);
+        const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', '-']);
 
         return new Promise((resolve) => {
             let stdout = '';
             let stderr = '';
-
-            ps.stdout.on('data', (data) => {
-                stdout += data.toString();
-            });
-
-            ps.stderr.on('data', (data) => {
-                stderr += data.toString();
-            });
-
+            ps.stdout.on('data', (data) => { stdout += data.toString(); });
+            ps.stderr.on('data', (data) => { stderr += data.toString(); });
             ps.on('close', (code) => {
                 if (code !== 0) {
-                    const errorMsg = stderr ? `Stderr: ${stderr}` : `Exit code: ${code}`;
-                    logError(`PowerShell execution failed. ${errorMsg}`);
-                    resolve({ drivers: [], errors });
-                    return;
+                    logError(`PowerShell execution failed. Stderr: ${stderr}`);
+                    resolve({ drivers: [], errors }); return;
                 }
-                if (stderr) {
-                    logError(`PowerShell process wrote to stderr: ${stderr}`);
-                }
-
+                if (stderr) { logError(`PowerShell process wrote to stderr: ${stderr}`); }
                 try {
                     if (!stdout.trim() || stdout.trim() === '[]') {
-                        errors.push(`Scan complete: No .inf files found or processed in directory: ${folderPath}`);
-                        resolve({ drivers: [], errors });
-                        return;
+                        errors.push(`Scan complete: No .inf files found in directory: ${folderPath}`);
+                        resolve({ drivers: [], errors }); return;
                     }
                     const results = JSON.parse(stdout);
                     const resultsArray = Array.isArray(results) ? results : (results ? [results] : []);
-                    
                     const allDrivers = resultsArray.map((item, index) => {
                         if (item.isError) {
                             const infName = path.basename(item.infPath);
-                            const errorMessage = `Failed to parse INF '${infName}': ${item.message.split('\n')[0]}`;
-                            logError(errorMessage);
-                            return {
-                                id: `${item.infPath}-${index}`,
-                                displayName: infName, // Fallback to filename
-                                infName: infName,
-                                fullInfPath: item.infPath,
-                                provider: 'N/A',
-                                className: 'N/A',
-                                version: 'N/A',
-                                parsingError: item.message,
-                            };
+                            logError(`Failed to parse INF '${infName}': ${item.message.split('\n')[0]}`);
+                            return { id: `${item.infPath}-${index}`, displayName: infName, infName, fullInfPath: item.infPath, provider: 'N/A', className: 'N/A', version: 'N/A', parsingError: item.message };
                         } else {
-                            const parts = [item.provider, item.className].filter(Boolean);
-                            let displayName = parts.join(' - ');
-                            if (!displayName) {
-                                displayName = item.originalName;
-                            }
-
-                            return {
-                                ...item,
-                                id: `${item.fullInfPath}-${item.originalName}-${index}`,
-                                displayName: displayName,
-                                infName: item.originalName,
-                                parsingError: undefined,
-                            };
+                            const displayName = [item.provider, item.className].filter(Boolean).join(' - ') || item.originalName;
+                            return { ...item, id: `${item.fullInfPath}-${item.originalName}-${index}`, displayName, infName: item.originalName, parsingError: undefined };
                         }
                     });
-
                     resolve({ drivers: allDrivers, errors });
                 } catch (e: any) {
-                    logError(`Error parsing driver info JSON from PowerShell. Raw Output: ${stdout}. Error: ${e.message}`);
+                    logError(`Error parsing driver info JSON. Raw Output: ${stdout}. Error: ${e.message}`);
                     resolve({ drivers: [], errors });
                 }
             });
-
             ps.stdin.write(scriptContent);
             ps.stdin.end();
         });
@@ -398,7 +337,6 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
         return { drivers: [], errors };
     }
 });
-
 
 
 // Check if a folder is empty
@@ -415,6 +353,149 @@ ipcMain.handle('is-folder-empty', async (_, folderPath: string) => {
     return false; // On other errors, assume not empty to be safe
   }
 });
+
+ipcMain.handle('get-os-info', async () => {
+  return new Promise((resolve) => {
+    const command = 'powershell -command "(Get-ComputerInfo | Select-Object OsProductName, OsBuildNumber) | ConvertTo-Json -Compress"';
+    exec(command, (error, stdout) => {
+      if (error || !stdout) {
+        resolve({ OsProductName: os.type(), OsBuildNumber: os.release() });
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch {
+        resolve({ OsProductName: os.type(), OsBuildNumber: os.release() });
+      }
+    });
+  });
+});
+
+ipcMain.on('do-full-backup', async (event, backupPath: string) => {
+  const webContents = event.sender;
+  const dismCommand = `dism /online /export-driver /destination:"${backupPath}"`;
+  webContents.send('command-start', "در حال پشتیبان‌گیری از تمام درایورهای نصب شده");
+
+  const dismProcess = exec(dismCommand, { encoding: 'utf8', maxBuffer: 1024 * 1024 * 5 });
+  dismProcess.stdout?.on('data', (data) => webContents.send('command-output', data.toString()));
+  dismProcess.stderr?.on('data', (data) => webContents.send('command-output', `ERROR: ${data.toString()}`));
+  
+  dismProcess.on('close', async (code) => {
+    if (code !== 0) {
+      webContents.send('command-end', code);
+      return;
+    }
+    try {
+      webContents.send('command-output', '\nDISM backup successful. Adding metadata files...');
+      const osInfoCmd = 'powershell -command "(Get-ComputerInfo | Select-Object OsProductName, OsBuildNumber) | ConvertTo-Json -Compress"';
+      const osInfo = await new Promise<{ OsProductName: string; OsBuildNumber: string }>((resolve, reject) => {
+          exec(osInfoCmd, (err, stdout) => err ? reject(err) : resolve(JSON.parse(stdout)));
+      });
+
+      const backupDate = new Date().toISOString();
+      const subDirs = await fs.readdir(backupPath, { withFileTypes: true });
+
+      for (const dirent of subDirs) {
+        if (dirent.isDirectory()) {
+          const driverFolderPath = path.join(backupPath, dirent.name);
+          const filesInFolder = await fs.readdir(driverFolderPath);
+          const infFile = filesInFolder.find(f => f.toLowerCase().endsWith('.inf'));
+
+          if (infFile) {
+            const details = [
+              `[DriverDolphin Backup Details]`,
+              `BackupDate: ${backupDate}`,
+              `BackupOS: ${osInfo.OsProductName}`,
+              `BackupOSBuild: ${osInfo.OsBuildNumber}`,
+              `INFFile: ${infFile}`,
+              `ManualRestoreGuide:`,
+              `1. Open Command Prompt or PowerShell as Administrator.`,
+              `2. Navigate to this driver's folder.`,
+              `3. Run the following command:`,
+              `pnputil /add-driver .\\${infFile} /install`
+            ].join('\r\n');
+            await fs.writeFile(path.join(driverFolderPath, 'driver_details.txt'), details);
+          }
+        }
+      }
+      webContents.send('command-output', 'Metadata files added successfully.');
+      webContents.send('command-end', 0);
+    } catch (error: any) {
+      webContents.send('command-output', `ERROR adding metadata: ${error.message}`);
+      webContents.send('command-end', 1);
+    }
+  });
+});
+
+ipcMain.on('do-selective-backup', async (event, { selectedDrivers, destinationPath }: { selectedDrivers: any[], destinationPath: string }) => {
+    const webContents = event.sender;
+    if (selectedDrivers.length === 0) {
+        webContents.send('command-end', 1);
+        return;
+    }
+
+    try {
+        const windowsPath = os.homedir().split(path.sep)[0] + path.sep + 'Windows';
+        const fileRepoPath = `${windowsPath}\\System32\\DriverStore\\FileRepository`;
+        
+        const getBaseName = (filePath: string) => filePath ? filePath.substring(filePath.lastIndexOf('\\') + 1) : '';
+        const infNames = selectedDrivers.map(d => getBaseName(d.originalName).replace('.inf', ''));
+        const whereClauses = infNames.map(n => `($_.Name -like '${n}.inf_*')`).join(' -or ');
+
+        const osInfoCmd = 'powershell -command "(Get-ComputerInfo | Select-Object OsProductName, OsBuildNumber) | ConvertTo-Json -Compress"';
+        const osInfo = await new Promise<{ OsProductName: string; OsBuildNumber: string }>((resolve, reject) => {
+            exec(osInfoCmd, (err, stdout) => err ? reject(err) : resolve(JSON.parse(stdout)));
+        });
+        const backupDate = new Date().toISOString();
+
+        const escapedDest = destinationPath.replace(/'/g, "''");
+        const escapedRepoPath = fileRepoPath.replace(/'/g, "''");
+
+        const psCommand = `
+            $dest = '${escapedDest}';
+            $sourcePath = '${escapedRepoPath}';
+            $driverFolders = Get-ChildItem -Path $sourcePath -Directory | Where-Object { ${whereClauses} };
+            if ($null -ne $driverFolders) {
+                $driverFolders | ForEach-Object { 
+                    Write-Host "Copying driver package: $($_.Name)";
+                    $targetDir = Join-Path -Path $dest -ChildPath $_.Name;
+                    Copy-Item -Path $_.FullName -Destination $dest -Recurse -Container -Force -Confirm:$false;
+                    
+                    $infFile = (Get-ChildItem -Path $targetDir -Filter *.inf | Select-Object -First 1).Name;
+                    if ($infFile) {
+                        $detailsContent = @"
+[DriverDolphin Backup Details]
+BackupDate: ${backupDate}
+BackupOS: ${osInfo.OsProductName}
+BackupOSBuild: ${osInfo.OsBuildNumber}
+INFFile: $infFile
+ManualRestoreGuide:
+1. Open Command Prompt or PowerShell as Administrator.
+2. Navigate to this driver's folder ($($_.Name)).
+3. Run the following command:
+pnputil /add-driver .\\$infFile /install
+"@
+                        Set-Content -Path (Join-Path -Path $targetDir -ChildPath 'driver_details.txt') -Value $detailsContent -Encoding UTF8
+                    }
+                }
+            } else {
+                Write-Host "No matching driver packages found in FileRepository to copy."
+            }
+        `;
+        const command = `powershell -NoProfile -ExecutionPolicy Bypass -Command "${psCommand.replace(/\s\s+/g, ' ').trim()}"`;
+        
+        const description = `در حال پشتیبان‌گیری از ${selectedDrivers.length} درایور انتخاب شده`;
+        webContents.send('command-start', description);
+        const child = exec(command, { encoding: 'utf8', maxBuffer: 1024 * 1024 * 5 });
+        child.stdout?.on('data', (data) => webContents.send('command-output', data.toString()));
+        child.stderr?.on('data', (data) => webContents.send('command-output', `ERROR: ${data.toString()}`));
+        child.on('close', (code) => webContents.send('command-end', code));
+    } catch (error: any) {
+        webContents.send('command-output', `ERROR preparing selective backup: ${error.message}`);
+        webContents.send('command-end', 1);
+    }
+});
+
 
 app.on('ready', () => {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {

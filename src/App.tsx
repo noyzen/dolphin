@@ -36,6 +36,22 @@ interface Notification {
   message: string;
 }
 
+interface ConfirmationButton {
+    text: string;
+    style: 'primary' | 'secondary' | 'info';
+}
+
+interface ConfirmationState {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  detail?: string;
+  buttons: ConfirmationButton[];
+  icon?: string;
+  iconColor?: string;
+  onResolve: (buttonIndex: number) => void;
+}
+
 
 declare global {
   interface Window {
@@ -55,7 +71,6 @@ declare global {
       validatePath: (path: string) => Promise<boolean>;
       scanBackupFolder: (folderPath: string) => Promise<{ drivers: DriverFromBackup[], errors: string[] }>;
       isFolderEmpty: (folderPath: string) => Promise<boolean>;
-      showConfirmationDialog: (options: any) => Promise<number>;
       onCommandStart: (callback: (description: string) => void) => () => void;
       onCommandOutput: (callback: (output: string) => void) => () => void;
       onCommandEnd: (callback: (code: number | null) => void) => () => void;
@@ -135,6 +150,51 @@ const AboutModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             <p className="text-xs text-gray-500 mb-6">نسخه ۱.۰.۰</p>
             <button onClick={onClose} className="btn-secondary px-8">بستن</button>
         </div>
+    </div>
+  );
+};
+
+const ConfirmationModal: React.FC<{
+  isOpen: boolean;
+  title: string;
+  message: string;
+  detail?: string;
+  buttons: ConfirmationButton[];
+  onSelect: (buttonIndex: number) => void;
+  icon?: string;
+  iconColor?: string;
+}> = ({ isOpen, title, message, detail, buttons, onSelect, icon, iconColor }) => {
+  if (!isOpen) return null;
+
+  const getButtonClass = (style: ConfirmationButton['style']) => {
+    switch (style) {
+      case 'primary': return 'btn-primary';
+      case 'info': return 'btn-info';
+      case 'secondary':
+      default:
+        return 'btn-secondary';
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[102] animate-fade-in">
+      <div className="bg-brand-light rounded-lg shadow-2xl ring-1 ring-brand-border max-w-lg w-full p-8 m-4 flex flex-col items-center text-center" onClick={e => e.stopPropagation()}>
+        {icon && <i className={`fas ${icon} text-5xl ${iconColor || 'text-brand-accent'} mb-4`}></i>}
+        <h2 className="text-2xl font-bold text-white mb-3">{title}</h2>
+        <p className="text-gray-300 mb-4 whitespace-pre-wrap">{message}</p>
+        {detail && <pre className="text-sm bg-brand-dark/50 p-3 rounded-md text-gray-400 mb-6 w-full text-right font-sans whitespace-pre-wrap">{detail}</pre>}
+        <div className="flex justify-center items-center flex-wrap gap-4 mt-6">
+          {buttons.map((button, index) => (
+            <button
+              key={index}
+              onClick={() => onSelect(index)}
+              className={getButtonClass(button.style)}
+            >
+              {button.text}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 };
@@ -238,6 +298,59 @@ const App: React.FC = () => {
   const [selectiveRestoreSearch, setSelectiveRestoreSearch] = useState('');
 
   const notificationIdCounter = useRef(0);
+
+  const [confirmationState, setConfirmationState] = useState<ConfirmationState>({
+    isOpen: false,
+    title: '',
+    message: '',
+    buttons: [],
+    onResolve: () => {},
+  });
+
+  const requestConfirmation = useCallback((options: {
+      type?: 'warning' | 'question';
+      title: string;
+      message: string;
+      detail?: string;
+      buttons: string[];
+    }): Promise<number> => {
+
+    let icon: string | undefined;
+    let iconColor: string | undefined;
+
+    switch(options.type) {
+        case 'warning':
+            icon = 'fa-exclamation-triangle';
+            iconColor = 'text-yellow-400';
+            break;
+        case 'question':
+            icon = 'fa-question-circle';
+            iconColor = 'text-blue-400';
+            break;
+    }
+
+    const buttonConfigs: ConfirmationButton[] = options.buttons.map((text) => {
+         if (text.toLowerCase().includes('بله برای همه')) return { text, style: 'info' };
+         if (text.toLowerCase().includes('بله') || text.toLowerCase().includes('ادامه')) return { text, style: 'primary' };
+         return { text, style: 'secondary' };
+    });
+
+    return new Promise((resolve) => {
+        setConfirmationState({
+            isOpen: true,
+            title: options.title,
+            message: options.message,
+            detail: options.detail,
+            buttons: buttonConfigs,
+            icon,
+            iconColor,
+            onResolve: (buttonIndex: number) => {
+                setConfirmationState(prev => ({ ...prev, isOpen: false }));
+                resolve(buttonIndex);
+            },
+        });
+    });
+  }, []);
 
   const addLog = useCallback((type: LogType, message: string) => {
     const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -398,13 +511,11 @@ const App: React.FC = () => {
   const confirmNonEmptyFolder = async (path: string): Promise<boolean> => {
     const isEmpty = await window.electronAPI.isFolderEmpty(path);
     if (!isEmpty) {
-        const response = await window.electronAPI.showConfirmationDialog({
+        const response = await requestConfirmation({
             type: 'warning',
             title: 'پوشه مقصد خالی نیست',
             message: 'پوشه مقصد انتخاب شده حاوی فایل‌هایی است. فایل‌های موجود ممکن است رونویسی شوند.\n\nآیا می‌خواهید ادامه دهید؟',
             buttons: ['ادامه پشتیبان‌گیری', 'لغو'],
-            defaultId: 1,
-            cancelId: 1,
         });
         if (response === 1) { // User cancelled
             addLog('INFO', 'Backup cancelled by user due to non-empty destination.');
@@ -468,14 +579,12 @@ const App: React.FC = () => {
               }
 
               setCurrentOperation(`در انتظار تایید کاربر برای ${backupDriver.displayName}`);
-              const response = await window.electronAPI.showConfirmationDialog({
+              const response = await requestConfirmation({
                   type: 'question',
                   title: 'درایور از قبل نصب شده است',
                   message: `یک درایور با همین نسخه از قبل نصب شده است:`,
                   detail: `درایور: ${backupDriver.displayName}\nنسخه: ${backupDriver.version}\n\nآیا می‌خواهید آن را جایگزین کنید؟`,
                   buttons: ['بله', 'خیر', 'بله برای همه', 'لغو'],
-                  defaultId: 1,
-                  cancelId: 3,
               });
 
               if (response === 0) { // Yes
@@ -981,6 +1090,16 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-black flex flex-col">
+      <ConfirmationModal
+        isOpen={confirmationState.isOpen}
+        title={confirmationState.title}
+        message={confirmationState.message}
+        detail={confirmationState.detail}
+        buttons={confirmationState.buttons}
+        icon={confirmationState.icon}
+        iconColor={confirmationState.iconColor}
+        onSelect={confirmationState.onResolve}
+      />
       {showAboutModal && <AboutModal onClose={() => setShowAboutModal(false)} />}
       <TitleBar isMaximized={isMaximized} onAboutClick={() => setShowAboutModal(true)} />
       <NotificationContainer notifications={notifications} onDismiss={removeNotification} />

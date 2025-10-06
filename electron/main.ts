@@ -415,14 +415,6 @@ ipcMain.handle('is-folder-empty', async (_, folderPath: string) => {
   }
 });
 
-// Show a confirmation dialog
-ipcMain.handle('show-confirmation-dialog', async (event, options: MessageBoxOptions) => {
-  if (!mainWindow) return options.cancelId ?? 1; // Default to cancel if no window
-  const { response } = await dialog.showMessageBox(mainWindow, options);
-  return response;
-});
-
-
 app.on('ready', () => {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({

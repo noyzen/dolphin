@@ -331,8 +331,10 @@ const App: React.FC = () => {
     }
 
     const buttonConfigs: ConfirmationButton[] = options.buttons.map((text) => {
-         if (text.toLowerCase().includes('بله برای همه')) return { text, style: 'info' };
-         if (text.toLowerCase().includes('بله') || text.toLowerCase().includes('ادامه')) return { text, style: 'primary' };
+         const lowerText = text.toLowerCase();
+         if (lowerText.includes('همه')) return { text, style: 'info' };
+         if (lowerText.includes('ادامه') || lowerText.includes('نصب') || lowerText.includes('بله')) return { text, style: 'primary' };
+         // Everything else (cancel, skip, no) is secondary
          return { text, style: 'secondary' };
     });
 
@@ -566,34 +568,31 @@ const App: React.FC = () => {
       }
 
       const driversToInstallPaths = new Set<string>();
-      let replaceAllConfirmed = false;
+      let installAllConfirmed = false;
 
       for (const backupDriver of driversToRestore) {
-          const existingDriver = backupDriver.version && backupDriver.version !== 'N/A' && installedDrivers.find(
-              (d) => d.originalName === backupDriver.infName && d.version === backupDriver.version
+          const existingDriver = installedDrivers.find(
+              (d) => d.originalName.toLowerCase() === backupDriver.infName.toLowerCase()
           );
 
-          if (existingDriver) {
-              if (replaceAllConfirmed) {
-                  driversToInstallPaths.add(backupDriver.fullInfPath);
-                  continue;
-              }
-
+          if (existingDriver && !installAllConfirmed) {
               setCurrentOperation(`در انتظار تایید کاربر برای ${backupDriver.displayName}`);
               const response = await requestConfirmation({
                   type: 'question',
                   title: 'درایور از قبل نصب شده است',
-                  message: `یک درایور با همین نسخه از قبل نصب شده است:`,
-                  detail: `درایور: ${backupDriver.displayName}\nنسخه: ${backupDriver.version}\n\nآیا می‌خواهید آن را جایگزین کنید؟`,
-                  buttons: ['بله', 'خیر', 'بله برای همه', 'لغو'],
+                  message: `یک درایور با نام فایل مشابه از قبل در سیستم وجود دارد. آیا می‌خواهید نصب درایور از پشتیبان را امتحان کنید؟`,
+                  detail: `درایور موجود: ${existingDriver.provider} (${existingDriver.version})\n` +
+                          `درایور پشتیبان: ${backupDriver.displayName} (${backupDriver.version || 'N/A'})\n\n` +
+                          `توجه: ویندوز فقط در صورتی درایور را جایگزین می‌کند که نسخه پشتیبان جدیدتر باشد.`,
+                  buttons: ['نصب', 'رد شدن', 'نصب همه موارد باقی‌مانده', 'لغو عملیات'],
               });
 
-              if (response === 0) { // Yes
+              if (response === 0) { // Install
                   driversToInstallPaths.add(backupDriver.fullInfPath);
-              } else if (response === 1) { // No
+              } else if (response === 1) { // Skip
                   addLog('INFO', `User skipped reinstalling driver: ${backupDriver.displayName}`);
-              } else if (response === 2) { // Yes to All
-                  replaceAllConfirmed = true;
+              } else if (response === 2) { // Install All
+                  installAllConfirmed = true;
                   driversToInstallPaths.add(backupDriver.fullInfPath);
               } else if (response === 3) { // Cancel
                   addLog('INFO', 'Restore operation cancelled by user.');
@@ -603,6 +602,7 @@ const App: React.FC = () => {
                   return;
               }
           } else {
+              // If no existing driver found, or if user chose "Install All", add to list
               driversToInstallPaths.add(backupDriver.fullInfPath);
           }
       }
@@ -985,15 +985,11 @@ const App: React.FC = () => {
                     <div key={driver.id} className="driver-list-item">
                         <input type="checkbox" id={driver.id} checked={selectedDriversFromBackup.has(driver.id)} onChange={() => toggleBackupDriverSelection(driver.id)} />
                         <label htmlFor={driver.id} className="flex-grow cursor-pointer text-sm pl-3">
-                            <span className={`font-bold text-gray-200 block ${driver.parsingError ? 'text-yellow-400' : ''}`}>
-                                {driver.parsingError && <i className="fas fa-exclamation-triangle text-yellow-500 mr-2" title={driver.parsingError}></i>}
-                                {driver.displayName}
+                            <span className="font-bold text-gray-200 block">{driver.displayName}</span>
+                            <span className="text-gray-400 text-xs block">
+                                {driver.version && driver.version !== 'N/A' && `Version: ${driver.version} `}
+                                ({driver.infName})
                             </span>
-                            {!driver.parsingError &&
-                                <span className="text-gray-400 text-xs block">
-                                    {driver.version ? `Version: ${driver.version}` : 'اطلاعات نسخه یافت نشد'} ({driver.infName})
-                                </span>
-                            }
                         </label>
                     </div>
                 ))}

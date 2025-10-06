@@ -271,8 +271,13 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                             elseif ($_ -imatch '^\\s*Class\\s*=\\s*(.*)$') {
                                 $props.className = $Matches[1].Trim().Trim('"');
                             }
-                            elseif ($_ -imatch '^\\s*DriverVer\\s*=\\s*.*?\\,\\s*([\\d\\.]+)$') {
-                                $props.version = $Matches[1].Trim();
+                            elseif ($_ -imatch '^\\s*DriverVer\\s*=\\s*(.*)$') {
+                                $fullVerLine = $Matches[1].Trim().Trim('"');
+                                # More robustly capture the version number, which is typically the last part of the string.
+                                # This avoids issues with different date formats or lack of a date.
+                                if ($fullVerLine -match '([\\d\\.]+)$') {
+                                    $props.version = $Matches[1].Trim();
+                                }
                             }
                         };
 

@@ -277,7 +277,7 @@ const App: React.FC = () => {
       
       addLog('END_SUCCESS', `Scan complete. Found ${foundDrivers.length} driver packages.`);
       
-      const hasRealErrors = errors && errors.some(e => !e.startsWith('Found ') && !e.startsWith('Scan complete: No .inf'));
+      const hasRealErrors = errors && errors.some(e => !e.startsWith('Scan complete: No .inf'));
 
       if (hasRealErrors) {
           addNotification('error', 'خطا در اسکن', 'برخی از فایل‌های درایور قابل پردازش نبودند. به لاگ‌ها مراجعه کنید.');
@@ -619,14 +619,43 @@ const App: React.FC = () => {
       if(selectedDrivers.size === 0 || !selectiveBackupPath || isBusy) return;
       if (!(await confirmNonEmptyFolder(selectiveBackupPath))) return;
 
+      const getBaseName = (filePath: string) => {
+          if (!filePath) return '';
+          const pathSeparator = filePath.includes('\\') ? '\\' : '/';
+          return filePath.substring(filePath.lastIndexOf(pathSeparator) + 1);
+      };
+
       const selectedDriverInfo = drivers.filter(d => selectedDrivers.has(d.publishedName));
+      const infNames = selectedDriverInfo.map(d => getBaseName(d.originalName).replace('.inf', ''));
+      
+      if (infNames.length === 0) {
+        addNotification('warning', 'درایور معتبری انتخاب نشده', 'نام فایل برای درایورهای انتخاب شده شناسایی نشد.');
+        return;
+      }
+      
       const fileRepoPath = `${windowsPath}\\System32\\DriverStore\\FileRepository`;
-      const infNames = selectedDriverInfo.map(d => d.originalName.replace('.inf', ''));
       
-      const whereClauses = infNames.map(n => `($_.Name -like '${n}*')`).join(' -or ');
-      const command = `Get-ChildItem -Path '${fileRepoPath}' -Recurse -Directory | Where-Object { ${whereClauses} } | Copy-Item -Destination '${selectiveBackupPath}' -Recurse -Container -Force`;
+      // A more specific filter to avoid matching similar names (e.g., driver vs driver_ext)
+      const whereClauses = infNames.map(n => `($_.Name -like '${n}.inf_*')`).join(' -or ');
+
+      const psCommand = `
+        $dest = '${selectiveBackupPath}';
+        $sourcePath = '${fileRepoPath}';
+        $driverFolders = Get-ChildItem -Path $sourcePath -Directory | Where-Object { ${whereClauses} };
+        if ($null -eq $driverFolders) {
+            Write-Host "No matching driver packages found in FileRepository to copy."
+        } else {
+            $driverFolders | ForEach-Object { 
+                Write-Host "Copying driver package: $($_.Name)";
+                Copy-Item -Path $_.FullName -Destination $dest -Recurse -Container -Force -Confirm:$false 
+            }
+        }
+      `;
       
-      window.electronAPI.runCommand(`powershell -Command "${command}"`, `در حال پشتیبان‌گیری از ${selectedDrivers.size} درایور انتخاب شده`);
+      // Clean up the command string for execution
+      const command = `powershell -NoProfile -ExecutionPolicy Bypass -Command "${psCommand.replace(/\r?\n|\r/g, ' ').replace(/\s\s+/g, ' ').trim()}"`;
+      
+      window.electronAPI.runCommand(command, `در حال پشتیبان‌گیری از ${selectedDrivers.size} درایور انتخاب شده`);
   };
   
   const handleSelectiveRestore = () => {

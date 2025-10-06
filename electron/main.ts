@@ -278,7 +278,17 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
 
                         if ($props.provider -and $props.version) {
                              $allDrivers += New-Object psobject -Property $props;
+                        } else {
+                            $missing = @()
+                            if (-not $props.provider) { $missing += "Provider" }
+                            if (-not $props.version) { $missing += "DriverVer" }
+                            $reason = "Skipped: Missing required properties (" + ($missing -join ', ') + ")"
+                            $errorRecord = @{ isError = $true; infPath = $infPath; message = $reason }
+                            $allDrivers += New-Object psobject -Property $errorRecord
                         }
+                    } else {
+                         $errorRecord = @{ isError = $true; infPath = $infPath; message = "Could not find [Version] section." }
+                         $allDrivers += New-Object psobject -Property $errorRecord
                     }
 
                 } catch {

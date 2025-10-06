@@ -233,7 +233,7 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                     
                     if ($infContent -match '(?msi)\\[Strings\\]\\s*\\r?\\n(.*?)(?:\\r?\\n\\[|$)') {
                         $stringSection = $Matches[1];
-                        $stringSection.Split([System.Environment]::NewLine) | ForEach-Object {
+                        $stringSection -split '\\r?\\n' | ForEach-Object {
                             if ($_ -match '^\\s*([^;=\\s]+)\\s*=\\s*(.*)$') {
                                 $key = $Matches[1].Trim()
                                 $value = $Matches[2].Trim().Trim('"')
@@ -254,7 +254,7 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                             fullInfPath = $infPath;
                         };
 
-                        $versionSection.Split([System.Environment]::NewLine) | ForEach-Object {
+                        $versionSection -split '\\r?\\n' | ForEach-Object {
                             if ($_ -imatch '^\\s*Provider\\s*=\\s*(.*)$') {
                                 $val = $Matches[1].Trim().Trim('"');
                                 if ($val.StartsWith('%') -and $val.EndsWith('%')) {
@@ -273,10 +273,11 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                             }
                             elseif ($_ -imatch '^\\s*DriverVer\\s*=\\s*(.*)$') {
                                 $fullVerLine = $Matches[1].Trim().Trim('"');
-                                # More robustly capture the version number, which is typically the last part of the string.
-                                # This avoids issues with different date formats or lack of a date.
-                                if ($fullVerLine -match '([\\d\\.]+)$') {
-                                    $props.version = $Matches[1].Trim();
+                                # The version is typically the last component after a comma.
+                                # If no comma, the whole string is treated as the version.
+                                $versionParts = $fullVerLine.Split(',');
+                                if ($versionParts.Length -gt 0) {
+                                    $props.version = $versionParts[-1].Trim();
                                 }
                             }
                         };
@@ -347,24 +348,34 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                     }
                     const results = JSON.parse(stdout);
                     const resultsArray = Array.isArray(results) ? results : (results ? [results] : []);
-
-                    const successfulDrivers: any[] = [];
-                    resultsArray.forEach(item => {
+                    
+                    const allDrivers = resultsArray.map((item, index) => {
                         if (item.isError) {
-                            logError(`Failed to parse INF '${path.basename(item.infPath)}': ${item.message.split('\n')[0]}`);
+                            const infName = path.basename(item.infPath);
+                            const errorMessage = `Failed to parse INF '${infName}': ${item.message.split('\n')[0]}`;
+                            logError(errorMessage);
+                            return {
+                                id: `${item.infPath}-${index}`,
+                                displayName: infName, // Fallback to filename
+                                infName: infName,
+                                fullInfPath: item.infPath,
+                                provider: 'N/A',
+                                className: 'N/A',
+                                version: 'N/A',
+                                parsingError: item.message,
+                            };
                         } else {
-                            successfulDrivers.push(item);
+                            return {
+                                ...item,
+                                id: `${item.fullInfPath}-${item.originalName}-${index}`,
+                                displayName: `${item.provider || 'Unknown'} - ${item.className || item.originalName}`,
+                                infName: item.originalName,
+                                parsingError: undefined,
+                            };
                         }
                     });
 
-                    const formattedDrivers = successfulDrivers.map((d, index) => ({
-                        ...d,
-                        id: `${d.fullInfPath}-${d.originalName}-${index}`,
-                        displayName: `${d.provider || 'Unknown'} - ${d.className || d.originalName}`,
-                        infName: d.originalName,
-                    }));
-
-                    resolve({ drivers: formattedDrivers, errors });
+                    resolve({ drivers: allDrivers, errors });
                 } catch (e: any) {
                     logError(`Error parsing driver info JSON from PowerShell. Raw Output: ${stdout}. Error: ${e.message}`);
                     resolve({ drivers: [], errors });

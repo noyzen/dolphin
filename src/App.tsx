@@ -15,9 +15,10 @@ interface DriverFromBackup {
   displayName: string;
   infName: string;
   fullInfPath: string;
-  provider: string;
-  className: string;
-  version: string;
+  provider?: string;
+  className?: string;
+  version?: string;
+  parsingError?: string;
 }
 
 type LogType = 'START' | 'OUTPUT' | 'END_SUCCESS' | 'END_ERROR' | 'INFO' | 'WARN';
@@ -445,7 +446,7 @@ const App: React.FC = () => {
       let replaceAllConfirmed = false;
 
       for (const backupDriver of driversToRestore) {
-          const existingDriver = installedDrivers.find(
+          const existingDriver = backupDriver.version && backupDriver.version !== 'N/A' && installedDrivers.find(
               (d) => d.originalName === backupDriver.infName && d.version === backupDriver.version
           );
 
@@ -675,9 +676,9 @@ const App: React.FC = () => {
     const lowercasedFilter = selectiveRestoreSearch.toLowerCase();
     return driversFromBackup.filter(driver =>
         driver.displayName.toLowerCase().includes(lowercasedFilter) ||
-        driver.infName.toLowerCase().includes(lowercasedFilter) ||
-        driver.provider.toLowerCase().includes(lowercasedFilter) ||
-        driver.version.toLowerCase().includes(lowercasedFilter)
+        (driver.infName && driver.infName.toLowerCase().includes(lowercasedFilter)) ||
+        (driver.provider && driver.provider.toLowerCase().includes(lowercasedFilter)) ||
+        (driver.version && driver.version.toLowerCase().includes(lowercasedFilter))
     );
   }, [driversFromBackup, selectiveRestoreSearch]);
   
@@ -863,8 +864,13 @@ const App: React.FC = () => {
                     <div key={driver.id} className="driver-list-item">
                         <input type="checkbox" id={driver.id} checked={selectedDriversFromBackup.has(driver.id)} onChange={() => toggleBackupDriverSelection(driver.id)} />
                         <label htmlFor={driver.id} className="flex-grow cursor-pointer text-sm pl-3">
-                            <span className="font-bold text-gray-200 block">{driver.displayName}</span>
-                            <span className="text-gray-400 text-xs block">Version: {driver.version} ({driver.infName})</span>
+                            <span className={`font-bold text-gray-200 block ${driver.parsingError ? 'text-yellow-400' : ''}`}>
+                                {driver.parsingError && <i className="fas fa-exclamation-triangle text-yellow-500 mr-2" title={driver.parsingError}></i>}
+                                {driver.displayName}
+                            </span>
+                            {!driver.parsingError &&
+                                <span className="text-gray-400 text-xs block">Version: {driver.version} ({driver.infName})</span>
+                            }
                         </label>
                     </div>
                 ))}

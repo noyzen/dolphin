@@ -32,16 +32,21 @@ let mainWindow: BrowserWindow | null = null;
 // Helper function to get OS info robustly
 async function getOsInformation(): Promise<{ osName: string; osBuild: string }> {
   return new Promise((resolve) => {
-    const command = 'powershell -command "(Get-ComputerInfo | Select-Object OsProductName, OsBuildNumber) | ConvertTo-Json -Compress"';
+    // This CIM command is generally faster and more reliable than Get-ComputerInfo
+    const command = `powershell -command "$os = Get-CimInstance Win32_OperatingSystem; [PSCustomObject]@{ OsProductName = $os.Caption; OsBuildNumber = $os.BuildNumber } | ConvertTo-Json -Compress"`;
     exec(command, (error, stdout) => {
       if (error || !stdout.trim()) {
         console.error('Failed to get OS info via PowerShell, falling back to os module.', error);
+        // Fallback provides basic info, but it's better than null.
         resolve({ osName: os.type(), osBuild: os.release() });
         return;
       }
       try {
         const info = JSON.parse(stdout);
-        resolve({ osName: info.OsProductName, osBuild: info.OsBuildNumber });
+        // Ensure we're getting strings back
+        const osName = info.OsProductName || os.type();
+        const osBuild = info.OsBuildNumber || os.release();
+        resolve({ osName: String(osName), osBuild: String(osBuild) });
       } catch (e) {
         console.error('Failed to parse OS info from PowerShell, falling back to os module.', e);
         resolve({ osName: os.type(), osBuild: os.release() });
@@ -172,6 +177,7 @@ ipcMain.on('run-command', (event, command: string, description: string) => {
   });
 
   child.on('close', (code) => {
+    webContents.send('command-progress', null);
     webContents.send('command-end', code);
   });
 });
@@ -387,47 +393,67 @@ ipcMain.on('do-full-backup', async (event, backupPath: string) => {
   webContents.send('command-start', "در حال پشتیبان‌گیری از تمام درایورهای نصب شده");
 
   const dismProcess = exec(dismCommand, { encoding: 'utf8', maxBuffer: 1024 * 1024 * 5 });
-  dismProcess.stdout?.on('data', (data) => webContents.send('command-output', data.toString()));
+
+  dismProcess.stdout?.on('data', (data) => {
+    webContents.send('command-output', data.toString());
+    const progressMatch = data.toString().match(/\[=*\s*(\d+)%\s*=*\]/);
+    if (progressMatch && progressMatch[1]) {
+        const progress = parseInt(progressMatch[1], 10);
+        webContents.send('command-progress', { progress });
+    }
+  });
+
   dismProcess.stderr?.on('data', (data) => webContents.send('command-output', `ERROR: ${data.toString()}`));
   
   dismProcess.on('close', async (code) => {
+    webContents.send('command-progress', null);
     if (code !== 0) {
       webContents.send('command-end', code);
       return;
     }
     try {
       webContents.send('command-output', '\nDISM backup successful. Adding metadata files...');
+      webContents.send('command-progress', { progress: 100, text: 'Adding metadata...' });
+
       const { osName, osBuild } = await getOsInformation();
       const backupDate = new Date().toISOString();
       const subDirs = await fs.readdir(backupPath, { withFileTypes: true });
+      const driverDirs = subDirs.filter(d => d.isDirectory());
+      let processed = 0;
 
-      for (const dirent of subDirs) {
-        if (dirent.isDirectory()) {
-          const driverFolderPath = path.join(backupPath, dirent.name);
-          const filesInFolder = await fs.readdir(driverFolderPath);
-          const infFile = filesInFolder.find(f => f.toLowerCase().endsWith('.inf'));
+      for (const dirent of driverDirs) {
+        processed++;
+        const driverFolderPath = path.join(backupPath, dirent.name);
+        webContents.send('command-progress', {
+            progress: Math.round((processed / driverDirs.length) * 100),
+            text: `Processing ${dirent.name}`
+        });
 
-          if (infFile) {
-            const details = [
-              `[DriverDolphin Backup Details]`,
-              `BackupDate: ${backupDate}`,
-              `BackupOS: ${osName}`,
-              `BackupOSBuild: ${osBuild}`,
-              `INFFile: ${infFile}`,
-              `ManualRestoreGuide:`,
-              `1. Open Command Prompt or PowerShell as Administrator.`,
-              `2. Navigate to this driver's folder.`,
-              `3. Run the following command:`,
-              `pnputil /add-driver .\\${infFile} /install`
-            ].join('\r\n');
-            await fs.writeFile(path.join(driverFolderPath, 'driver_details.txt'), details);
-          }
+        const filesInFolder = await fs.readdir(driverFolderPath);
+        const infFile = filesInFolder.find(f => f.toLowerCase().endsWith('.inf'));
+
+        if (infFile) {
+          const details = [
+            `[DriverDolphin Backup Details]`,
+            `BackupDate: ${backupDate}`,
+            `BackupOS: ${osName}`,
+            `BackupOSBuild: ${osBuild}`,
+            `INFFile: ${infFile}`,
+            `ManualRestoreGuide:`,
+            `1. Open Command Prompt or PowerShell as Administrator.`,
+            `2. Navigate to this driver's folder.`,
+            `3. Run the following command:`,
+            `pnputil /add-driver .\\${infFile} /install`
+          ].join('\r\n');
+          await fs.writeFile(path.join(driverFolderPath, 'driver_details.txt'), details);
         }
       }
       webContents.send('command-output', 'Metadata files added successfully.');
+      webContents.send('command-progress', null);
       webContents.send('command-end', 0);
     } catch (error: any) {
       webContents.send('command-output', `ERROR adding metadata: ${error.message}`);
+      webContents.send('command-progress', null);
       webContents.send('command-end', 1);
     }
   });
@@ -459,8 +485,12 @@ ipcMain.on('do-selective-backup', async (event, { selectedDrivers, destinationPa
             $sourcePath = '${escapedRepoPath}';
             $driverFolders = Get-ChildItem -Path $sourcePath -Directory | Where-Object { ${whereClauses} };
             if ($null -ne $driverFolders) {
+                $total = ($driverFolders | Measure-Object).Count
+                Write-Host "PROGRESS_TOTAL:$total"
+                $count = 0
                 $driverFolders | ForEach-Object { 
-                    Write-Host "Copying driver package: $($_.Name)";
+                    $count++
+                    Write-Host "PROGRESS_UPDATE:$count:Copying driver package: $($_.Name)";
                     $targetDir = Join-Path -Path $dest -ChildPath $_.Name;
                     Copy-Item -Path $_.FullName -Destination $dest -Recurse -Container -Force -Confirm:$false;
                     
@@ -490,12 +520,85 @@ pnputil /add-driver .\\$infFile /install
         const description = `در حال پشتیبان‌گیری از ${selectedDrivers.length} درایور انتخاب شده`;
         webContents.send('command-start', description);
         const child = exec(command, { encoding: 'utf8', maxBuffer: 1024 * 1024 * 5 });
-        child.stdout?.on('data', (data) => webContents.send('command-output', data.toString()));
+        let totalProgressItems = 0;
+        child.stdout?.on('data', (data) => {
+            const output = data.toString();
+            webContents.send('command-output', output);
+            const lines = output.split('\n');
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                if (trimmedLine.startsWith('PROGRESS_TOTAL:')) {
+                    totalProgressItems = parseInt(trimmedLine.split(':')[1], 10) || 0;
+                } else if (trimmedLine.startsWith('PROGRESS_UPDATE:')) {
+                    const parts = trimmedLine.split(':');
+                    if(parts.length >= 3) {
+                        const currentItem = parseInt(parts[1], 10);
+                        const text = parts.slice(2).join(':');
+                        if (totalProgressItems > 0 && !isNaN(currentItem)) {
+                            const progress = Math.round((currentItem / totalProgressItems) * 100);
+                            webContents.send('command-progress', { progress, text });
+                        }
+                    }
+                }
+            }
+        });
         child.stderr?.on('data', (data) => webContents.send('command-output', `ERROR: ${data.toString()}`));
-        child.on('close', (code) => webContents.send('command-end', code));
+        child.on('close', (code) => {
+            webContents.send('command-progress', null);
+            webContents.send('command-end', code)
+        });
     } catch (error: any) {
         webContents.send('command-output', `ERROR preparing selective backup: ${error.message}`);
         webContents.send('command-end', 1);
+    }
+});
+
+ipcMain.on('do-sequential-restore', async (event, driverInfPaths: string[]) => {
+    const webContents = event.sender;
+    const total = driverInfPaths.length;
+    if (total === 0) {
+        webContents.send('command-end', 0);
+        return;
+    }
+
+    webContents.send('command-start', `در حال نصب ${total} درایور`);
+    let failedCount = 0;
+    let rebootRequired = false;
+
+    for (let i = 0; i < total; i++) {
+        const infPath = driverInfPaths[i];
+        const progress = Math.round(((i + 1) / total) * 100);
+        const driverName = path.basename(path.dirname(infPath));
+        
+        webContents.send('command-progress', { progress, text: `درحال نصب ${driverName} (${i + 1}/${total})` });
+
+        const command = `pnputil /add-driver "${infPath}" /install`;
+        webContents.send('command-output', `\n> ${command}`);
+
+        const result = await new Promise<{ stdout: string, stderr: string, code: number | null }>((resolve) => {
+            exec(command, (err, stdout, stderr) => {
+                resolve({ stdout, stderr, code: err ? err.code ?? 1 : 0 });
+            });
+        });
+
+        if (result.stdout) webContents.send('command-output', result.stdout);
+        if (result.stderr) webContents.send('command-output', `ERROR: ${result.stderr}`);
+        
+        const code = result.code;
+        if (code === 3010) rebootRequired = true;
+
+        if (code !== 0 && code !== 3010 && code !== 259) {
+            failedCount++;
+        }
+    }
+    
+    webContents.send('command-progress', null);
+    webContents.send('command-output', `\nRestore complete. ${total - failedCount} succeeded, ${failedCount} failed.`);
+    
+    if(rebootRequired) {
+        webContents.send('command-end', 3010);
+    } else {
+        webContents.send('command-end', failedCount > 0 ? 1 : 0);
     }
 });
 

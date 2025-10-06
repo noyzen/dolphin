@@ -31,12 +31,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isFolderEmpty: (folderPath: string): Promise<boolean> => ipcRenderer.invoke('is-folder-empty', folderPath),
   doFullBackup: (backupPath: string) => ipcRenderer.send('do-full-backup', backupPath),
   doSelectiveBackup: (options: { selectedDrivers: any[], destinationPath: string }) => ipcRenderer.send('do-selective-backup', options),
+  doSequentialRestore: (driverInfPaths: string[]) => ipcRenderer.send('do-sequential-restore', driverInfPaths),
 
 
   // Command output listeners
   onCommandStart: (callback: (description: string) => void) => {
     ipcRenderer.on('command-start', (_event, description) => callback(description));
     return () => ipcRenderer.removeAllListeners('command-start');
+  },
+  onCommandProgress: (callback: (progress: { progress: number, text?: string } | null) => void) => {
+    const handler = (_event: IpcRendererEvent, progress: { progress: number, text?: string } | null) => callback(progress);
+    ipcRenderer.on('command-progress', handler);
+    return () => ipcRenderer.removeListener('command-progress', handler);
   },
   onCommandOutput: (callback: (output: string) => void) => {
     ipcRenderer.on('command-output', (_event, output) => callback(output));

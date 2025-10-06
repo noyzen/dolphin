@@ -60,6 +60,11 @@ interface OsInfo {
     OsBuildNumber: string;
 }
 
+interface ProgressInfo {
+    value: number;
+    text?: string;
+}
+
 
 declare global {
   interface Window {
@@ -82,7 +87,9 @@ declare global {
       isFolderEmpty: (folderPath: string) => Promise<boolean>;
       doFullBackup: (backupPath: string) => void;
       doSelectiveBackup: (options: { selectedDrivers: DriverInfo[], destinationPath: string }) => void;
+      doSequentialRestore: (driverInfPaths: string[]) => void;
       onCommandStart: (callback: (description: string) => void) => () => void;
+      onCommandProgress: (callback: (progress: { progress: number, text?: string } | null) => void) => () => void;
       onCommandOutput: (callback: (output: string) => void) => () => void;
       onCommandEnd: (callback: (code: number | null) => void) => () => void;
     };
@@ -261,13 +268,24 @@ const TitleBar: React.FC<{ isMaximized: boolean; onAboutClick: () => void; }> = 
   );
 };
 
-const BusyIndicator: React.FC<{ operation: string }> = ({ operation }) => (
+const BusyIndicator: React.FC<{ operation: string; progress: ProgressInfo | null }> = ({ operation, progress }) => (
     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-50 transition-opacity duration-300">
         <i className="fas fa-cog fa-spin text-5xl text-brand-accent mb-4"></i>
         <p className="text-white text-lg font-medium">{operation}...</p>
-        <div className="w-48 h-2 bg-gray-700 rounded-full overflow-hidden mt-4">
-            <div className="h-full bg-gradient-to-r from-green-500 to-teal-400 animated-gradient"></div>
+        <div className="w-64 h-2.5 bg-gray-700 rounded-full overflow-hidden mt-4 relative ring-1 ring-black/50">
+            {progress ? (
+                <>
+                    <div 
+                        className="h-full bg-gradient-to-r from-green-500 to-brand-accent transition-all duration-300 ease-linear"
+                        style={{ width: `${progress.value}%` }}
+                    ></div>
+                    <span className="absolute inset-0 text-center text-xs font-bold text-white" style={{ lineHeight: '0.625rem' }}>{progress.value}%</span>
+                </>
+            ) : (
+                <div className="h-full bg-gradient-to-r from-green-500 to-teal-400 animated-gradient"></div>
+            )}
         </div>
+        {progress && progress.text && <p className="text-gray-300 text-sm mt-2 max-w-xs text-center truncate">{progress.text}</p>}
     </div>
 );
 
@@ -280,6 +298,7 @@ const App: React.FC = () => {
   const [logFilter, setLogFilter] = useState('');
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [currentOperation, setCurrentOperation] = useState('');
+  const [progress, setProgress] = useState<ProgressInfo | null>(null);
   const currentOperationRef = useRef('');
   const commandOutputRef = useRef<string[]>([]);
 
@@ -418,6 +437,7 @@ const App: React.FC = () => {
       commandOutputRef.current = []; // Clear output for new command
       setIsBusy(true);
       setCurrentOperation(description);
+      setProgress(null);
       addLog('START', `Operation started: ${description}`);
   }, [addLog]);
 
@@ -445,6 +465,7 @@ const App: React.FC = () => {
             addLog('END_ERROR', `Operation finished with exit code ${code}, but a warning was detected in output.`);
             setIsBusy(false);
             setCurrentOperation('');
+            setProgress(null);
             addNotification('warning', 'ایجاد نقطه بازیابی انجام نشد', 'یک نقطه بازیابی اخیراً ایجاد شده است. لطفاً بعداً دوباره امتحان کنید.');
             return; // Exit early to prevent generic success message
         }
@@ -467,7 +488,16 @@ const App: React.FC = () => {
         }
     }
     setCurrentOperation('');
+    setProgress(null);
   }, [addLog, addNotification]);
+
+  const onCommandProgress = useCallback((progressData: { progress: number; text?: string } | null) => {
+      if (progressData) {
+          setProgress({ value: progressData.progress, text: progressData.text });
+      } else {
+          setProgress(null);
+      }
+  }, []);
 
   useEffect(() => {
     window.electronAPI.checkAdmin().then(setIsAdmin);
@@ -509,16 +539,18 @@ const App: React.FC = () => {
     });
     
     const cleanupStart = window.electronAPI.onCommandStart(onCommandStart);
+    const cleanupProgress = window.electronAPI.onCommandProgress(onCommandProgress);
     const cleanupOutput = window.electronAPI.onCommandOutput(onCommandOutput);
     const cleanupEnd = window.electronAPI.onCommandEnd(onCommandEnd);
     
     return () => {
       cleanupWindowState();
       cleanupStart();
+      cleanupProgress();
       cleanupOutput();
       cleanupEnd();
     };
-  }, [addLog, addNotification, onCommandStart, onCommandOutput, onCommandEnd, scanBackupFolder]);
+  }, [addLog, addNotification, onCommandStart, onCommandProgress, onCommandOutput, onCommandEnd, scanBackupFolder]);
   
   const createPathSetter = (stateSetter: React.Dispatch<React.SetStateAction<string>>, key: string) => {
     return (path: string) => {
@@ -668,8 +700,7 @@ const App: React.FC = () => {
 
       const finalPaths = Array.from(driversToInstallPaths);
       if (finalPaths.length > 0) {
-          const installCommand = finalPaths.map(path => `pnputil /add-driver "${path}" /install`).join(' & ');
-          window.electronAPI.runCommand(installCommand, `در حال نصب ${finalPaths.length} درایور`);
+          window.electronAPI.doSequentialRestore(finalPaths);
           addNotification('info', 'نصب شروع شد', 'برای مشاهده جزئیات نصب هر درایور به لاگ‌ها مراجعه کنید.');
       } else {
           addLog('INFO', 'No drivers required installation.');
@@ -1115,7 +1146,7 @@ const App: React.FC = () => {
         </nav>
 
         <main className="flex-grow p-6 relative overflow-y-auto">
-           {isBusy && <BusyIndicator operation={currentOperation} />}
+           {isBusy && <BusyIndicator operation={currentOperation} progress={progress} />}
            {isSystemRestoreEnabled === false && showRestoreWarningBanner && (
               <div className="bg-yellow-900/50 text-yellow-200 p-3 mb-4 rounded-md text-sm ring-1 ring-yellow-500/50 flex items-center justify-between gap-3">
                   <div className="flex items-start gap-3">

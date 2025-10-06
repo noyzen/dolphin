@@ -270,6 +270,7 @@ const App: React.FC = () => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [currentOperation, setCurrentOperation] = useState('');
   const currentOperationRef = useRef('');
+  const commandOutputRef = useRef<string[]>([]);
 
   useEffect(() => {
     currentOperationRef.current = currentOperation;
@@ -402,6 +403,7 @@ const App: React.FC = () => {
   }, [addLog, addNotification]);
 
   const onCommandStart = useCallback((description: string) => {
+      commandOutputRef.current = []; // Clear output for new command
       setIsBusy(true);
       setCurrentOperation(description);
       addLog('START', `Operation started: ${description}`);
@@ -410,6 +412,7 @@ const App: React.FC = () => {
   const onCommandOutput = useCallback((output: string) => {
       const cleanedOutput = output.trim();
       if (cleanedOutput) {
+         commandOutputRef.current.push(cleanedOutput);
          addLog('OUTPUT', cleanedOutput);
       }
   }, [addLog]);
@@ -421,12 +424,25 @@ const App: React.FC = () => {
     // pnputil exit code 3010 (0xBC2) means ERROR_SUCCESS_REBOOT_REQUIRED.
     const isRebootRequired = code === 3010;
     
+    const operationName = currentOperationRef.current;
+    const fullOutput = commandOutputRef.current.join('\n');
+
+    // Specific check for restore point creation failure that still returns exit code 0
+    if (operationName === "در حال ایجاد یک نقطه بازیابی سیستم جدید" && code === 0) {
+        if (fullOutput.toLowerCase().includes("a new system restore point cannot be created")) {
+            addLog('END_ERROR', `Operation finished with exit code ${code}, but a warning was detected in output.`);
+            setIsBusy(false);
+            setCurrentOperation('');
+            addNotification('warning', 'ایجاد نقطه بازیابی انجام نشد', 'یک نقطه بازیابی اخیراً ایجاد شده است. لطفاً بعداً دوباره امتحان کنید.');
+            return; // Exit early to prevent generic success message
+        }
+    }
+    
     const success = isSuccess || isNoOp || isRebootRequired;
     
     addLog(success ? 'END_SUCCESS' : 'END_ERROR', `Operation finished with exit code ${code}.`);
     setIsBusy(false);
     
-    const operationName = currentOperationRef.current;
     if (operationName) {
         if (isSuccess) {
             addNotification('success', 'عملیات موفق', `${operationName} با موفقیت به پایان رسید.`);

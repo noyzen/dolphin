@@ -273,11 +273,18 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                             }
                             elseif ($_ -imatch '^\\s*DriverVer\\s*=\\s*(.*)$') {
                                 $fullVerLine = $Matches[1].Trim().Trim('"');
-                                # The version is typically the last component after a comma.
-                                # If no comma, the whole string is treated as the version.
-                                $versionParts = $fullVerLine.Split(',');
-                                if ($versionParts.Length -gt 0) {
-                                    $props.version = $versionParts[-1].Trim();
+                                # Use a more robust regex to find the version string, which is typically a series of numbers and dots.
+                                # This avoids issues with date formats or comma separators.
+                                if ($fullVerLine -match '([0-9]+\\.[0-9]+(\\.[0-9]+)*)$') {
+                                    $props.version = $Matches[1].Trim()
+                                }
+                                elseif ($fullVerLine.Contains(',')) {
+                                    # Fallback for formats like "Date,Version"
+                                    $props.version = $fullVerLine.Split(',')[-1].Trim();
+                                }
+                                else {
+                                    # If all else fails, take the whole line
+                                    $props.version = $fullVerLine;
                                 }
                             }
                         };

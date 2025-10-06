@@ -299,19 +299,30 @@ const App: React.FC = () => {
   }, [addLog]);
 
   const onCommandEnd = useCallback((code: number | null) => {
-      const success = code === 0;
-      addLog(success ? 'END_SUCCESS' : 'END_ERROR', `Operation finished with exit code ${code}.`);
-      setIsBusy(false);
-      
-      const operationName = currentOperationRef.current;
-      if (operationName) {
-          if (success) {
-              addNotification('success', 'عملیات موفق', `${operationName} با موفقیت به پایان رسید.`);
-          } else {
-              addNotification('error', 'عملیات ناموفق', `${operationName} با خطا مواجه شد. به لاگ‌ها مراجعه کنید.`);
-          }
-      }
-      setCurrentOperation('');
+    const isSuccess = code === 0;
+    // pnputil exit code 259 (0x103) means ERROR_NO_MORE_ITEMS, often indicating a no-op (driver already installed/up-to-date).
+    const isNoOp = code === 259; 
+    // pnputil exit code 3010 (0xBC2) means ERROR_SUCCESS_REBOOT_REQUIRED.
+    const isRebootRequired = code === 3010;
+    
+    const success = isSuccess || isNoOp || isRebootRequired;
+    
+    addLog(success ? 'END_SUCCESS' : 'END_ERROR', `Operation finished with exit code ${code}.`);
+    setIsBusy(false);
+    
+    const operationName = currentOperationRef.current;
+    if (operationName) {
+        if (isSuccess) {
+            addNotification('success', 'عملیات موفق', `${operationName} با موفقیت به پایان رسید.`);
+        } else if (isNoOp) {
+            addNotification('info', 'عملیات کامل شد', 'درایورها از قبل بروز بودند و نیازی به نصب مجدد نبود.');
+        } else if (isRebootRequired) {
+            addNotification('warning', 'عملیات موفق، نیاز به راه‌اندازی مجدد', `${operationName} با موفقیت انجام شد، اما برای اعمال کامل تغییرات، سیستم باید راه‌اندازی مجدد شود.`);
+        } else {
+            addNotification('error', 'عملیات ناموفق', `${operationName} با خطا مواجه شد. کد خطا: ${code}. به لاگ‌ها مراجعه کنید.`);
+        }
+    }
+    setCurrentOperation('');
   }, [addLog, addNotification]);
 
   useEffect(() => {

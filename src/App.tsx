@@ -887,7 +887,9 @@ const App: React.FC = () => {
             <p className="text-gray-400 mb-6">از تمام درایورهای نصب شده (غیر پیش‌فرض ویندوز) در یک پوشه پشتیبان تهیه کنید تا بتوانید بعداً آن‌ها را بازیابی کنید. جزئیات نسخه ویندوز فعلی نیز برای هر درایور ذخیره خواهد شد.</p>
             <div className="flex items-center space-x-reverse space-x-2 mb-6">
                 <input type="text" readOnly value={backupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
-                <button onClick={() => handleSelectFolder(setPersistedBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0" title="انتخاب پوشه"><i className="fas fa-folder-open"></i></button>
+                <button onClick={() => handleSelectFolder(setPersistedBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0">
+                    <i className="fas fa-folder-open mr-2"></i> انتخاب پوشه
+                </button>
             </div>
             <div className="mt-auto flex justify-start">
               <button onClick={handleFullBackup} disabled={!backupPath || isBusy} className="btn-primary w-64">
@@ -913,7 +915,9 @@ const App: React.FC = () => {
 
             <div className="flex items-center space-x-reverse space-x-2 mb-6">
                 <input type="text" readOnly value={restorePath} placeholder="پوشه پشتیبان را انتخاب کنید..." className="form-input-custom" />
-                <button onClick={() => handleSelectFolder(setPersistedRestorePath)} disabled={isBusy} className="btn-secondary flex-shrink-0" title="انتخاب پوشه"><i className="fas fa-folder"></i></button>
+                <button onClick={() => handleSelectFolder(setPersistedRestorePath)} disabled={isBusy} className="btn-secondary flex-shrink-0">
+                    <i className="fas fa-folder-open mr-2"></i> انتخاب پوشه
+                </button>
             </div>
             <div className="mt-auto flex justify-start">
               <button onClick={handleFullRestore} disabled={!restorePath || isBusy} className="btn-primary w-64">
@@ -965,7 +969,9 @@ const App: React.FC = () => {
             <div className="flex-shrink-0 mt-4">
                  <div className="flex items-center space-x-reverse space-x-2 mb-4">
                     <input type="text" readOnly value={selectiveBackupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
-                    <button onClick={() => handleSelectFolder(setPersistedSelectiveBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0" title="انتخاب پوشه"><i className="fas fa-folder-open"></i></button>
+                    <button onClick={() => handleSelectFolder(setPersistedSelectiveBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0">
+                        <i className="fas fa-folder-open mr-2"></i> انتخاب پوشه
+                    </button>
                 </div>
                 <div className="flex justify-start">
                   <button onClick={handleSelectiveBackup} disabled={selectedDrivers.size === 0 || !selectiveBackupPath || isBusy} className="btn-primary w-64">
@@ -993,7 +999,9 @@ const App: React.FC = () => {
                             setPersistedSelectiveRestoreFolder(path);
                             scanBackupFolder(path);
                         });
-                    }} disabled={isBusy} className="btn-secondary flex-shrink-0" title="انتخاب و اسکن پوشه"><i className="fas fa-search-location"></i></button>
+                    }} disabled={isBusy} className="btn-secondary flex-shrink-0">
+                        <i className="fas fa-folder-open mr-2"></i> انتخاب و اسکن
+                    </button>
                 </div>
                 <div className="relative mb-2">
                     <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"></i>

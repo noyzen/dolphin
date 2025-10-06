@@ -29,6 +29,28 @@ const store = new Store<AppStore>({
 
 let mainWindow: BrowserWindow | null = null;
 
+// Helper function to get OS info robustly
+async function getOsInformation(): Promise<{ osName: string; osBuild: string }> {
+  return new Promise((resolve) => {
+    const command = 'powershell -command "(Get-ComputerInfo | Select-Object OsProductName, OsBuildNumber) | ConvertTo-Json -Compress"';
+    exec(command, (error, stdout) => {
+      if (error || !stdout.trim()) {
+        console.error('Failed to get OS info via PowerShell, falling back to os module.', error);
+        resolve({ osName: os.type(), osBuild: os.release() });
+        return;
+      }
+      try {
+        const info = JSON.parse(stdout);
+        resolve({ osName: info.OsProductName, osBuild: info.OsBuildNumber });
+      } catch (e) {
+        console.error('Failed to parse OS info from PowerShell, falling back to os module.', e);
+        resolve({ osName: os.type(), osBuild: os.release() });
+      }
+    });
+  });
+}
+
+
 const createWindow = () => {
   const { width, height, x, y } = store.get('windowBounds');
   const isMaximized = store.get('isMaximized');
@@ -355,20 +377,8 @@ ipcMain.handle('is-folder-empty', async (_, folderPath: string) => {
 });
 
 ipcMain.handle('get-os-info', async () => {
-  return new Promise((resolve) => {
-    const command = 'powershell -command "(Get-ComputerInfo | Select-Object OsProductName, OsBuildNumber) | ConvertTo-Json -Compress"';
-    exec(command, (error, stdout) => {
-      if (error || !stdout) {
-        resolve({ OsProductName: os.type(), OsBuildNumber: os.release() });
-        return;
-      }
-      try {
-        resolve(JSON.parse(stdout));
-      } catch {
-        resolve({ OsProductName: os.type(), OsBuildNumber: os.release() });
-      }
-    });
-  });
+    const { osName, osBuild } = await getOsInformation();
+    return { OsProductName: osName, OsBuildNumber: osBuild };
 });
 
 ipcMain.on('do-full-backup', async (event, backupPath: string) => {
@@ -387,11 +397,7 @@ ipcMain.on('do-full-backup', async (event, backupPath: string) => {
     }
     try {
       webContents.send('command-output', '\nDISM backup successful. Adding metadata files...');
-      const osInfoCmd = 'powershell -command "(Get-ComputerInfo | Select-Object OsProductName, OsBuildNumber) | ConvertTo-Json -Compress"';
-      const osInfo = await new Promise<{ OsProductName: string; OsBuildNumber: string }>((resolve, reject) => {
-          exec(osInfoCmd, (err, stdout) => err ? reject(err) : resolve(JSON.parse(stdout)));
-      });
-
+      const { osName, osBuild } = await getOsInformation();
       const backupDate = new Date().toISOString();
       const subDirs = await fs.readdir(backupPath, { withFileTypes: true });
 
@@ -405,8 +411,8 @@ ipcMain.on('do-full-backup', async (event, backupPath: string) => {
             const details = [
               `[DriverDolphin Backup Details]`,
               `BackupDate: ${backupDate}`,
-              `BackupOS: ${osInfo.OsProductName}`,
-              `BackupOSBuild: ${osInfo.OsBuildNumber}`,
+              `BackupOS: ${osName}`,
+              `BackupOSBuild: ${osBuild}`,
               `INFFile: ${infFile}`,
               `ManualRestoreGuide:`,
               `1. Open Command Prompt or PowerShell as Administrator.`,
@@ -442,10 +448,7 @@ ipcMain.on('do-selective-backup', async (event, { selectedDrivers, destinationPa
         const infNames = selectedDrivers.map(d => getBaseName(d.originalName).replace('.inf', ''));
         const whereClauses = infNames.map(n => `($_.Name -like '${n}.inf_*')`).join(' -or ');
 
-        const osInfoCmd = 'powershell -command "(Get-ComputerInfo | Select-Object OsProductName, OsBuildNumber) | ConvertTo-Json -Compress"';
-        const osInfo = await new Promise<{ OsProductName: string; OsBuildNumber: string }>((resolve, reject) => {
-            exec(osInfoCmd, (err, stdout) => err ? reject(err) : resolve(JSON.parse(stdout)));
-        });
+        const { osName, osBuild } = await getOsInformation();
         const backupDate = new Date().toISOString();
 
         const escapedDest = destinationPath.replace(/'/g, "''");
@@ -466,8 +469,8 @@ ipcMain.on('do-selective-backup', async (event, { selectedDrivers, destinationPa
                         $detailsContent = @"
 [DriverDolphin Backup Details]
 BackupDate: ${backupDate}
-BackupOS: ${osInfo.OsProductName}
-BackupOSBuild: ${osInfo.OsBuildNumber}
+BackupOS: ${osName}
+BackupOSBuild: ${osBuild}
 INFFile: $infFile
 ManualRestoreGuide:
 1. Open Command Prompt or PowerShell as Administrator.

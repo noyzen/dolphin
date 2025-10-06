@@ -914,16 +914,16 @@ const App: React.FC = () => {
       case 'full-backup':
         return (
           <div className="flex flex-col h-full">
-            <h2 className="text-2xl font-bold mb-4 text-gray-200">پشتیبان‌گیری کامل از درایورها</h2>
-            <p className="text-gray-400 mb-6">از تمام درایورهای نصب شده (غیر پیش‌فرض ویندوز) در یک پوشه پشتیبان تهیه کنید تا بتوانید بعداً آن‌ها را بازیابی کنید. جزئیات نسخه ویندوز فعلی نیز برای هر درایور ذخیره خواهد شد.</p>
-            <div className="flex items-center space-x-reverse space-x-2 mb-6">
+            <h2 className="text-2xl font-bold mb-2 text-gray-200">پشتیبان‌گیری کامل از درایورها</h2>
+            <p className="text-gray-400 text-sm mb-4">از تمام درایورهای نصب شده (غیر پیش‌فرض ویندوز) در یک پوشه پشتیبان تهیه کنید تا بتوانید بعداً آن‌ها را بازیابی کنید.</p>
+            <div className="flex items-center gap-2 mb-4">
                 <input type="text" readOnly value={backupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
                 <button onClick={() => handleSelectFolder(setPersistedBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0">
-                    <i className="fas fa-folder-open mr-2"></i> انتخاب پوشه
+                    <i className="fas fa-folder-open mr-2"></i> انتخاب
                 </button>
             </div>
-            <div className="mt-auto flex justify-start">
-              <button onClick={handleFullBackup} disabled={!backupPath || isBusy} className="btn-primary w-64">
+            <div className="mt-auto pt-4 border-t border-brand-border/50">
+              <button onClick={handleFullBackup} disabled={!backupPath || isBusy} className="btn-primary">
                   <i className="fas fa-play mr-2"></i> شروع پشتیبان‌گیری
               </button>
             </div>
@@ -932,26 +932,26 @@ const App: React.FC = () => {
       case 'full-restore':
          return (
           <div className="flex flex-col h-full">
-            <h2 className="text-2xl font-bold mb-4 text-gray-200">بازیابی کامل درایورها</h2>
-            <p className="text-gray-400 mb-6">تمام درایورهای موجود در پوشه پشتیبان را نصب کنید. این کار برای بازیابی درایورها روی یک ویندوز جدید یا همین سیستم مناسب است. برای اطمینان، ابتدا یک نقطه بازیابی سیستم ایجاد کنید.</p>
+            <h2 className="text-2xl font-bold mb-2 text-gray-200">بازیابی کامل درایورها</h2>
+            <p className="text-gray-400 text-sm mb-4">تمام درایورهای موجود در پوشه پشتیبان را نصب کنید. برای اطمینان، ابتدا یک نقطه بازیابی سیستم ایجاد کنید.</p>
             
-            <div className="mb-6 space-y-4">
-              <p className="text-gray-400 text-sm">
-                  وضعیت System Restore: {isSystemRestoreEnabled === null ? 'در حال بررسی...' : isSystemRestoreEnabled ? <span className="text-green-400 font-bold">فعال</span> : <span className="text-red-400 font-bold">غیرفعال</span>}
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4 p-3 bg-brand-dark/30 rounded-md ring-1 ring-brand-border/20">
+              <p className="text-gray-300 text-sm">
+                  وضعیت System Restore: {isSystemRestoreEnabled === null ? 'در حال بررسی...' : isSystemRestoreEnabled ? <span className="text-green-400 font-semibold">فعال</span> : <span className="text-red-400 font-semibold">غیرفعال</span>}
               </p>
-              <button onClick={handleCreateRestorePoint} disabled={isBusy || !isSystemRestoreEnabled} className="btn-info w-64">
+              <button onClick={handleCreateRestorePoint} disabled={isBusy || !isSystemRestoreEnabled} className="btn-info">
                   <i className="fas fa-shield-alt mr-2"></i> ایجاد نقطه بازیابی
               </button>
             </div>
 
-            <div className="flex items-center space-x-reverse space-x-2 mb-6">
+            <div className="flex items-center gap-2 mb-4">
                 <input type="text" readOnly value={restorePath} placeholder="پوشه پشتیبان را انتخاب کنید..." className="form-input-custom" />
                 <button onClick={() => handleSelectFolder(setPersistedRestorePath)} disabled={isBusy} className="btn-secondary flex-shrink-0">
-                    <i className="fas fa-folder-open mr-2"></i> انتخاب پوشه
+                    <i className="fas fa-folder-open mr-2"></i> انتخاب
                 </button>
             </div>
-            <div className="mt-auto flex justify-start">
-              <button onClick={handleFullRestore} disabled={!restorePath || isBusy} className="btn-primary w-64">
+            <div className="mt-auto pt-4 border-t border-brand-border/50">
+              <button onClick={handleFullRestore} disabled={!restorePath || isBusy} className="btn-primary">
                   <i className="fas fa-play mr-2"></i> شروع بازیابی
               </button>
             </div>
@@ -961,28 +961,31 @@ const App: React.FC = () => {
         return (
           <div className="flex flex-col h-full">
             <div className="flex-shrink-0">
-                <h2 className="text-2xl font-bold mb-4 text-gray-200">پشتیبان‌گیری انتخابی</h2>
-                <p className="text-gray-400 mb-2">درایورهای نصب شده روی سیستم را اسکن کرده و موارد دلخواه را برای پشتیبان‌گیری انتخاب کنید.</p>
-                <div className="mb-4">
-                  <button onClick={handleScanDrivers} disabled={isBusy} className="btn-secondary w-64">
-                      <i className="fas fa-search mr-2"></i> اسکن تمام درایورها
-                  </button>
+                <div className="flex justify-between items-center mb-2">
+                    <h2 className="text-2xl font-bold text-gray-200">پشتیبان‌گیری انتخابی</h2>
+                    <button onClick={handleScanDrivers} disabled={isBusy} className="btn-secondary">
+                        <i className="fas fa-search mr-2"></i> اسکن درایورها
+                    </button>
                 </div>
-                <div className="relative mb-2">
-                    <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"></i>
-                    <input type="text" value={selectiveBackupSearch} onChange={e => setSelectiveBackupSearch(e.target.value)} placeholder="جستجوی درایور..." className="form-input-custom pl-10" />
+                <p className="text-gray-400 text-sm mb-3">درایورهای نصب شده را اسکن کرده و موارد دلخواه را برای پشتیبان‌گیری انتخاب کنید.</p>
+                
+                <div className="flex items-center gap-4 mb-2">
+                    <div className="relative flex-grow">
+                        <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"></i>
+                        <input type="text" value={selectiveBackupSearch} onChange={e => setSelectiveBackupSearch(e.target.value)} placeholder="جستجوی درایور..." className="form-input-custom pl-10" />
+                    </div>
+                    <div className="flex items-center text-sm text-gray-300 flex-shrink-0">
+                        <input 
+                            type="checkbox" 
+                            id="select-all-drivers"
+                            checked={filteredDrivers.length > 0 && filteredDrivers.every(d => selectedDrivers.has(d.publishedName))}
+                            onChange={handleToggleSelectAll}
+                            disabled={filteredDrivers.length === 0 || isBusy}
+                        />
+                        <label htmlFor="select-all-drivers" className="pr-2 cursor-pointer">انتخاب همه</label>
+                    </div>
                 </div>
-                 <div className="flex items-center mb-2 text-sm text-gray-300">
-                    <input 
-                        type="checkbox" 
-                        id="select-all-drivers"
-                        checked={filteredDrivers.length > 0 && filteredDrivers.every(d => selectedDrivers.has(d.publishedName))}
-                        onChange={handleToggleSelectAll}
-                        disabled={filteredDrivers.length === 0 || isBusy}
-                    />
-                    <label htmlFor="select-all-drivers" className="pr-2 cursor-pointer">انتخاب همه موارد نمایش داده شده</label>
-                    <span className="pr-4 mr-auto text-gray-400">نمایش {filteredDrivers.length} از {drivers.length} درایور</span>
-                </div>
+                 <div className="text-right text-sm text-gray-400 mb-2">نمایش {filteredDrivers.length} از {drivers.length} درایور</div>
             </div>
             <div dir="ltr" className="driver-list flex-grow overflow-y-auto bg-brand-med/50 ring-1 ring-brand-border rounded-md p-1">
                 {drivers.length > 0 && filteredDrivers.length === 0 && <p className="text-gray-500 text-center p-4">هیچ درایوری با عبارت جستجو شده مطابقت ندارد.</p>}
@@ -997,17 +1000,16 @@ const App: React.FC = () => {
                     </div>
                 ))}
             </div>
-            <div className="flex-shrink-0 mt-4">
-                 <div className="flex items-center space-x-reverse space-x-2 mb-4">
-                    <input type="text" readOnly value={selectiveBackupPath} placeholder="پوشه مقصد را انتخاب کنید..." className="form-input-custom" />
+            <div className="flex-shrink-0 mt-3 pt-3 border-t border-brand-border/50">
+                 <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-300 flex-shrink-0">مقصد:</span>
+                    <input type="text" readOnly value={selectiveBackupPath} placeholder="پوشه مقصد..." className="form-input-custom" />
                     <button onClick={() => handleSelectFolder(setPersistedSelectiveBackupPath)} disabled={isBusy} className="btn-secondary flex-shrink-0">
-                        <i className="fas fa-folder-open mr-2"></i> انتخاب پوشه
+                        <i className="fas fa-folder-open mr-2"></i> انتخاب
                     </button>
-                </div>
-                <div className="flex justify-start">
-                  <button onClick={handleSelectiveBackup} disabled={selectedDrivers.size === 0 || !selectiveBackupPath || isBusy} className="btn-primary w-64">
-                      <i className="fas fa-download mr-2"></i> پشتیبان‌گیری از {selectedDrivers.size} درایور
-                  </button>
+                    <button onClick={handleSelectiveBackup} disabled={selectedDrivers.size === 0 || !selectiveBackupPath || isBusy} className="btn-primary flex-shrink-0">
+                      <i className="fas fa-download mr-2"></i> پشتیبان‌گیری ({selectedDrivers.size})
+                    </button>
                 </div>
             </div>
           </div>
@@ -1016,15 +1018,15 @@ const App: React.FC = () => {
          return (
           <div className="flex flex-col h-full">
             <div className="flex-shrink-0">
-                <h2 className="text-2xl font-bold mb-4 text-gray-200">بازیابی انتخابی از پوشه</h2>
-                <p className="text-gray-400 mb-2">یک پوشه پشتیبان را انتخاب کرده و درایورهای مورد نظر برای نصب را مشخص کنید.</p>
-                <div className="mb-4">
-                   <button onClick={handleCreateRestorePoint} disabled={isBusy || !isSystemRestoreEnabled} className="btn-info w-64">
+                <div className="flex justify-between items-center mb-2">
+                    <h2 className="text-2xl font-bold text-gray-200">بازیابی انتخابی</h2>
+                    <button onClick={handleCreateRestorePoint} disabled={isBusy || !isSystemRestoreEnabled} className="btn-info">
                       <i className="fas fa-shield-alt mr-2"></i> ایجاد نقطه بازیابی
-                  </button>
+                    </button>
                 </div>
-                <div className="flex items-center space-x-reverse space-x-2 mb-4">
-                    <input type="text" readOnly value={selectiveRestoreFolder} placeholder="پوشه پشتیبان را انتخاب و اسکن کنید..." className="form-input-custom" />
+                <p className="text-gray-400 text-sm mb-3">یک پوشه پشتیبان را اسکن کرده و درایورهای مورد نظر برای نصب را مشخص کنید.</p>
+                <div className="flex items-center gap-2 mb-2">
+                    <input type="text" readOnly value={selectiveRestoreFolder} placeholder="پوشه پشتیبان را انتخاب کنید..." className="form-input-custom" />
                     <button onClick={async () => {
                         await handleSelectFolder((path) => {
                             setPersistedSelectiveRestoreFolder(path);
@@ -1034,21 +1036,23 @@ const App: React.FC = () => {
                         <i className="fas fa-folder-open mr-2"></i> انتخاب و اسکن
                     </button>
                 </div>
-                <div className="relative mb-2">
-                    <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"></i>
-                    <input type="text" value={selectiveRestoreSearch} onChange={e => setSelectiveRestoreSearch(e.target.value)} placeholder="جستجوی درایور در پشتیبان..." className="form-input-custom pl-10" />
+                <div className="flex items-center gap-4 mb-2">
+                    <div className="relative flex-grow">
+                        <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"></i>
+                        <input type="text" value={selectiveRestoreSearch} onChange={e => setSelectiveRestoreSearch(e.target.value)} placeholder="جستجوی درایور در پشتیبان..." className="form-input-custom pl-10" />
+                    </div>
+                     <div className="flex items-center text-sm text-gray-300 flex-shrink-0">
+                        <input 
+                            type="checkbox" 
+                            id="select-all-backup-drivers"
+                            checked={filteredDriversFromBackup.length > 0 && filteredDriversFromBackup.every(d => selectedDriversFromBackup.has(d.id))}
+                            onChange={handleToggleSelectAllBackupDrivers}
+                            disabled={filteredDriversFromBackup.length === 0 || isBusy}
+                        />
+                        <label htmlFor="select-all-backup-drivers" className="pr-2 cursor-pointer">انتخاب همه</label>
+                    </div>
                 </div>
-                <div className="flex items-center mb-2 text-sm text-gray-300">
-                    <input 
-                        type="checkbox" 
-                        id="select-all-backup-drivers"
-                        checked={filteredDriversFromBackup.length > 0 && filteredDriversFromBackup.every(d => selectedDriversFromBackup.has(d.id))}
-                        onChange={handleToggleSelectAllBackupDrivers}
-                        disabled={filteredDriversFromBackup.length === 0 || isBusy}
-                    />
-                    <label htmlFor="select-all-backup-drivers" className="pr-2 cursor-pointer">انتخاب همه موارد نمایش داده شده</label>
-                    <span className="pr-4 mr-auto text-gray-400">نمایش {filteredDriversFromBackup.length} از {driversFromBackup.length} درایور</span>
-                </div>
+                <div className="text-right text-sm text-gray-400 mb-2">نمایش {filteredDriversFromBackup.length} از {driversFromBackup.length} درایور</div>
             </div>
             <div dir="ltr" className="driver-list flex-grow overflow-y-auto bg-brand-med/50 ring-1 ring-brand-border rounded-md p-1">
                 {driversFromBackup.length > 0 && filteredDriversFromBackup.length === 0 && <p className="text-gray-500 text-center p-4">هیچ درایوری با عبارت جستجو شده مطابقت ندارد.</p>}
@@ -1072,8 +1076,8 @@ const App: React.FC = () => {
                     </div>
                 ))}
             </div>
-            <div className="mt-auto flex justify-start pt-4 flex-shrink-0">
-              <button onClick={handleSelectiveRestore} disabled={selectedDriversFromBackup.size === 0 || isBusy} className="btn-primary w-64">
+            <div className="mt-auto pt-4 border-t border-brand-border/50 flex-shrink-0">
+              <button onClick={handleSelectiveRestore} disabled={selectedDriversFromBackup.size === 0 || isBusy} className="btn-primary">
                   <i className="fas fa-play mr-2"></i> نصب {selectedDriversFromBackup.size} درایور
               </button>
             </div>
@@ -1145,7 +1149,7 @@ const App: React.FC = () => {
               ))}
         </nav>
 
-        <main className="flex-grow p-6 relative overflow-y-auto">
+        <main className="flex-grow p-4 relative overflow-y-auto">
            {isBusy && <BusyIndicator operation={currentOperation} progress={progress} />}
            {isSystemRestoreEnabled === false && showRestoreWarningBanner && (
               <div className="bg-yellow-900/50 text-yellow-200 p-3 mb-4 rounded-md text-sm ring-1 ring-yellow-500/50 flex items-center justify-between gap-3">
@@ -1158,7 +1162,7 @@ const App: React.FC = () => {
                   </button>
               </div>
           )}
-           <div key={activeTab} className="content-fade-in bg-brand-med/60 backdrop-blur-sm rounded-xl shadow-2xl shadow-black/50 ring-1 ring-brand-border p-6 h-full">
+           <div key={activeTab} className="content-fade-in bg-brand-med/60 backdrop-blur-sm rounded-xl shadow-2xl shadow-black/50 ring-1 ring-brand-border p-4 h-full">
             {renderContent()}
           </div>
         </main>

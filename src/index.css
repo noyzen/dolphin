@@ -106,13 +106,13 @@ input[type="checkbox"]:checked::after {
     @apply w-full bg-brand-med/70 border border-brand-border rounded-md p-2 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-accent focus:border-brand-accent focus:bg-brand-med transition-all duration-200 shadow-inner shadow-black/30;
 }
 .btn-primary {
-     @apply bg-gradient-to-r from-green-500 to-brand-accent text-white font-bold py-3 px-8 rounded-md hover:from-green-400 hover:to-green-500 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 shadow-lg shadow-brand-accent/20 hover:shadow-brand-accent/40 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-brand-dark focus:ring-brand-accent;
+     @apply bg-gradient-to-r from-green-500 to-brand-accent text-white font-bold py-2 px-6 rounded-md hover:from-green-400 hover:to-green-500 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 shadow-lg shadow-brand-accent/20 hover:shadow-brand-accent/40 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-brand-dark focus:ring-brand-accent;
 }
 .btn-secondary {
     @apply px-4 py-2 bg-brand-light/80 text-gray-300 rounded-md border border-brand-border hover:bg-brand-light hover:text-white transition-all duration-200 disabled:opacity-50 shadow-md shadow-black/20 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-brand-dark focus:ring-gray-400;
 }
 .btn-info {
-     @apply bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-bold py-3 px-8 rounded-md hover:from-cyan-400 hover:to-blue-400 active:scale-95 transition-all duration-200 disabled:opacity-50 shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-brand-dark focus:ring-blue-500;
+     @apply bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-bold py-2 px-6 rounded-md hover:from-cyan-400 hover:to-blue-400 active:scale-95 transition-all duration-200 disabled:opacity-50 shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-brand-dark focus:ring-blue-500;
 }
 
 

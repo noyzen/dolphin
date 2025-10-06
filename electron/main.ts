@@ -289,16 +289,11 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                             }
                         };
 
-                        if ($props.provider -and $props.version) {
-                             $allDrivers += New-Object psobject -Property $props;
-                        } else {
-                            $missing = @()
-                            if (-not $props.provider) { $missing += "Provider" }
-                            if (-not $props.version) { $missing += "DriverVer" }
-                            $reason = "Skipped: Missing required properties (" + ($missing -join ', ') + ")"
-                            $errorRecord = @{ isError = $true; infPath = $infPath; message = $reason }
-                            $allDrivers += New-Object psobject -Property $errorRecord
-                        }
+                        # Be lenient: add the driver even if some properties are missing.
+                        # The UI will handle displaying what's available. A true parsing error
+                        # (like a missing [Version] section) is handled in the 'else' below.
+                        $allDrivers += New-Object psobject -Property $props;
+                        
                     } else {
                          $errorRecord = @{ isError = $true; infPath = $infPath; message = "Could not find [Version] section." }
                          $allDrivers += New-Object psobject -Property $errorRecord
@@ -372,10 +367,16 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                                 parsingError: item.message,
                             };
                         } else {
+                            const parts = [item.provider, item.className].filter(Boolean);
+                            let displayName = parts.join(' - ');
+                            if (!displayName) {
+                                displayName = item.originalName;
+                            }
+
                             return {
                                 ...item,
                                 id: `${item.fullInfPath}-${item.originalName}-${index}`,
-                                displayName: `${item.provider || 'Unknown'} - ${item.className || item.originalName}`,
+                                displayName: displayName,
                                 infName: item.originalName,
                                 parsingError: undefined,
                             };

@@ -145,6 +145,7 @@ const AboutModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[101]" onClick={onClose}>
         <div className="bg-brand-med rounded-lg shadow-2xl ring-1 ring-brand-border max-w-md w-full text-center p-8 m-4" onClick={e => e.stopPropagation()}>
             <i className="fas fa-water text-5xl text-brand-accent mb-4"></i>
+            {/* FIX: Corrected invalid 'hh2' tag to 'h2' and 'class' to 'className'. */}
             <h2 className="text-2xl font-bold text-white mb-2">دلفین درایور</h2>
             <p className="text-gray-400 mb-6">یک ابزار مدرن و آفلاین برای پشتیبان‌گیری و بازیابی درایورهای ویندوز.</p>
             <p className="text-xs text-gray-500 mb-6">نسخه ۱.۰.۰</p>
@@ -989,7 +990,9 @@ const App: React.FC = () => {
                                 {driver.displayName}
                             </span>
                             {!driver.parsingError &&
-                                <span className="text-gray-400 text-xs block">Version: {driver.version} ({driver.infName})</span>
+                                <span className="text-gray-400 text-xs block">
+                                    {driver.version ? `Version: ${driver.version}` : 'اطلاعات نسخه یافت نشد'} ({driver.infName})
+                                </span>
                             }
                         </label>
                     </div>

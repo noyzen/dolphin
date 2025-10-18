@@ -1,5 +1,5 @@
-appId: com.example.hellopersian
-productName: "سلام دنیا"
+appId: com.dolphindriver.app
+productName: "DolphinDriver"
 files:
   - "dist/**/*"
   - "dist-electron/**/*"
@@ -8,12 +8,12 @@ directories:
   output: release
 win:
   icon: appicon.png
-  executableName: "app"
+  executableName: "DolphinDriver"
   target:
     - dir
     - portable
     - nsis
 portable:
-  artifactName: app.${ext}
+  artifactName: DolphinDriver.${ext}
 nsis:
-  artifactName: "app setup.${ext}"
+  artifactName: "DolphinDriver Setup.${ext}"

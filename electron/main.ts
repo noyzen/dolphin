@@ -55,6 +55,26 @@ async function getOsInformation(): Promise<{ osName: string; osBuild: string }> 
   });
 }
 
+// Helper function to get hardware info
+async function getHardwareInfo(): Promise<any> {
+  return new Promise((resolve) => {
+    const command = `powershell -command "$cs = Get-CimInstance Win32_ComputerSystem; $bb = Get-CimInstance Win32_BaseBoard; $cpu = Get-CimInstance Win32_Processor; [PSCustomObject]@{ SystemUUID = (Get-CimInstance Win32_ComputerSystemProduct).UUID; SystemManufacturer = $cs.Manufacturer; SystemModel = $cs.Model; BaseBoardManufacturer = $bb.Manufacturer; BaseBoardProduct = $bb.Product; ProcessorName = $cpu.Name.Trim() } | ConvertTo-Json -Compress"`;
+    exec(command, (error, stdout) => {
+      if (error || !stdout.trim()) {
+        console.error('Failed to get hardware info via PowerShell.', error);
+        resolve({}); // Resolve with empty object on failure
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (e) {
+        console.error('Failed to parse hardware info from PowerShell.', e);
+        resolve({});
+      }
+    });
+  });
+}
+
 
 const createWindow = () => {
   const { width, height, x, y } = store.get('windowBounds');
@@ -145,7 +165,7 @@ ipcMain.on('close-window', () => {
   mainWindow?.close();
 });
 
-// IPC handlers for Driver Dolphin functionality
+// IPC handlers for DolphinDriver functionality
 ipcMain.handle('check-admin', async () => {
   return new Promise<boolean>((resolve) => {
     // The 'net session' command requires admin privileges and will fail if not elevated.
@@ -269,13 +289,16 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
 
                     # Read driver_details.txt
                     $detailsPath = Join-Path -Path $infFile.DirectoryName -ChildPath 'driver_details.txt'
-                    $details = @{ backupOS = ''; backupDate = ''; backupOSBuild = '' }
+                    $details = @{ backupOS = ''; backupDate = ''; backupOSBuild = ''; systemUUID = ''; systemModel = ''; processorName = '' }
                     if (Test-Path $detailsPath) {
                         try {
                             $detailsContent = Get-Content $detailsPath -Raw
                             if ($detailsContent -match 'BackupOS:\\s*(.*)') { $details.backupOS = $Matches[1].Trim() }
                             if ($detailsContent -match 'BackupDate:\\s*(.*)') { $details.backupDate = $Matches[1].Trim() }
                             if ($detailsContent -match 'BackupOSBuild:\\s*(.*)') { $details.backupOSBuild = $Matches[1].Trim() }
+                            if ($detailsContent -match 'SystemUUID:\\s*(.*)') { $details.systemUUID = $Matches[1].Trim() }
+                            if ($detailsContent -match 'SystemModel:\\s*(.*)') { $details.systemModel = $Matches[1].Trim() }
+                            if ($detailsContent -match 'ProcessorName:\\s*(.*)') { $details.processorName = $Matches[1].Trim() }
                         } catch {} # Silently ignore if details file is unreadable
                     }
                     
@@ -290,6 +313,9 @@ ipcMain.handle('scan-backup-folder', async (_, folderPath: string): Promise<{ dr
                             backupOS = $details.backupOS;
                             backupDate = $details.backupDate;
                             backupOSBuild = $details.backupOSBuild;
+                            systemUUID = $details.systemUUID;
+                            systemModel = $details.systemModel;
+                            processorName = $details.processorName;
                         };
 
                         $versionSection -split '\\r?\\n' | ForEach-Object {
@@ -387,6 +413,8 @@ ipcMain.handle('get-os-info', async () => {
     return { OsProductName: osName, OsBuildNumber: osBuild };
 });
 
+ipcMain.handle('get-hardware-info', getHardwareInfo);
+
 ipcMain.on('do-full-backup', async (event, backupPath: string) => {
   const webContents = event.sender;
   const dismCommand = `dism /online /export-driver /destination:"${backupPath}"`;
@@ -416,6 +444,7 @@ ipcMain.on('do-full-backup', async (event, backupPath: string) => {
       webContents.send('command-progress', { progress: 100, text: 'Adding metadata...' });
 
       const { osName, osBuild } = await getOsInformation();
+      const hardwareInfo = await getHardwareInfo();
       const backupDate = new Date().toISOString();
       const subDirs = await fs.readdir(backupPath, { withFileTypes: true });
       const driverDirs = subDirs.filter(d => d.isDirectory());
@@ -434,10 +463,16 @@ ipcMain.on('do-full-backup', async (event, backupPath: string) => {
 
         if (infFile) {
           const details = [
-            `[DriverDolphin Backup Details]`,
+            `[DolphinDriver Backup Details]`,
             `BackupDate: ${backupDate}`,
             `BackupOS: ${osName}`,
             `BackupOSBuild: ${osBuild}`,
+            `SystemUUID: ${hardwareInfo.SystemUUID || 'N/A'}`,
+            `SystemManufacturer: ${hardwareInfo.SystemManufacturer || 'N/A'}`,
+            `SystemModel: ${hardwareInfo.SystemModel || 'N/A'}`,
+            `BaseBoardManufacturer: ${hardwareInfo.BaseBoardManufacturer || 'N/A'}`,
+            `BaseBoardProduct: ${hardwareInfo.BaseBoardProduct || 'N/A'}`,
+            `ProcessorName: ${hardwareInfo.ProcessorName || 'N/A'}`,
             `INFFile: ${infFile}`,
             `ManualRestoreGuide:`,
             `1. Open Command Prompt or PowerShell as Administrator.`,
@@ -475,6 +510,7 @@ ipcMain.on('do-selective-backup', async (event, { selectedDrivers, destinationPa
         const whereClauses = infNames.map(n => `($_.Name -like '${n}.inf_*')`).join(' -or ');
 
         const { osName, osBuild } = await getOsInformation();
+        const hardwareInfo = await getHardwareInfo();
         const backupDate = new Date().toISOString();
 
         const escapedDest = destinationPath.replace(/'/g, "''");
@@ -497,10 +533,16 @@ ipcMain.on('do-selective-backup', async (event, { selectedDrivers, destinationPa
                     $infFile = (Get-ChildItem -Path $targetDir -Filter *.inf | Select-Object -First 1).Name;
                     if ($infFile) {
                         $detailsContent = @"
-[DriverDolphin Backup Details]
+[DolphinDriver Backup Details]
 BackupDate: ${backupDate}
 BackupOS: ${osName}
 BackupOSBuild: ${osBuild}
+SystemUUID: ${hardwareInfo.SystemUUID || 'N/A'}
+SystemManufacturer: ${hardwareInfo.SystemManufacturer || 'N/A'}
+SystemModel: ${hardwareInfo.SystemModel || 'N/A'}
+BaseBoardManufacturer: ${hardwareInfo.BaseBoardManufacturer || 'N/A'}
+BaseBoardProduct: ${hardwareInfo.BaseBoardProduct || 'N/A'}
+ProcessorName: ${hardwareInfo.ProcessorName || 'N/A'}
 INFFile: $infFile
 ManualRestoreGuide:
 1. Open Command Prompt or PowerShell as Administrator.

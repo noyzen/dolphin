@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('window-state-changed', handler);
   },
 
-  // Driver Dolphin functionality
+  // DolphinDriver functionality
   checkAdmin: (): Promise<boolean> => ipcRenderer.invoke('check-admin'),
   selectDialog: (options: OpenDialogOptions): Promise<string[]> => ipcRenderer.invoke('select-dialog', options),
   runCommand: (command: string, description: string) => ipcRenderer.send('run-command', command, description),
@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkSystemRestore: (): Promise<boolean> => ipcRenderer.invoke('check-system-restore'),
   getWindowsPath: (): Promise<string> => ipcRenderer.invoke('get-windows-path'),
   getOsInfo: (): Promise<{ OsProductName: string, OsBuildNumber: string }> => ipcRenderer.invoke('get-os-info'),
+  getHardwareInfo: (): Promise<any> => ipcRenderer.invoke('get-hardware-info'),
   
   // Settings Persistence
   getSetting: (key: string): Promise<any> => ipcRenderer.invoke('get-setting', key),

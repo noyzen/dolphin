@@ -1,5 +1,5 @@
 {
-  "name": "Driver Dolphin",
+  "name": "DolphinDriver",
   "description": "A modern, offline-first utility for backing up and restoring Windows drivers.",
   "requestFramePermissions": []
 }

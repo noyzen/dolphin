@@ -10,6 +10,15 @@ interface DriverInfo {
   version: string;
 }
 
+interface HardwareInfo {
+    SystemUUID: string;
+    SystemManufacturer: string;
+    SystemModel: string;
+    BaseBoardManufacturer: string;
+    BaseBoardProduct: string;
+    ProcessorName: string;
+}
+
 interface DriverFromBackup {
   id: string;
   displayName: string;
@@ -22,6 +31,9 @@ interface DriverFromBackup {
   backupOS?: string;
   backupDate?: string;
   backupOSBuild?: string;
+  systemUUID?: string;
+  systemModel?: string;
+  processorName?: string;
 }
 
 type LogType = 'START' | 'OUTPUT' | 'END_SUCCESS' | 'END_ERROR' | 'INFO' | 'WARN';
@@ -80,6 +92,7 @@ declare global {
       checkSystemRestore: () => Promise<boolean>;
       getWindowsPath: () => Promise<string>;
       getOsInfo: () => Promise<OsInfo>;
+      getHardwareInfo: () => Promise<HardwareInfo>;
       getSetting: (key: string) => Promise<any>;
       setSetting: (key: string, value: any) => void;
       validatePath: (path: string) => Promise<boolean>;
@@ -164,7 +177,7 @@ const AboutModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         <div className="bg-brand-med rounded-lg shadow-2xl ring-1 ring-brand-border max-w-md w-full text-center p-8 m-4" onClick={e => e.stopPropagation()}>
             <i className="fas fa-water text-5xl text-brand-accent mb-4"></i>
             {/* FIX: Corrected invalid 'hh2' tag to 'h2' and 'class' to 'className'. */}
-            <h2 className="text-2xl font-bold text-white mb-2">دلفین درایور</h2>
+            <h2 className="text-2xl font-bold text-white mb-2">DolphinDriver</h2>
             <p className="text-gray-400 mb-6">یک ابزار مدرن و آفلاین برای پشتیبان‌گیری و بازیابی درایورهای ویندوز.</p>
             <p className="text-xs text-gray-500 mb-6">نسخه ۱.۰.۰</p>
             <button onClick={onClose} className="btn-secondary px-8">بستن</button>
@@ -227,7 +240,7 @@ const TitleBar: React.FC<{ isMaximized: boolean; onAboutClick: () => void; }> = 
     >
       <div className="px-4 flex items-center gap-3 h-full text-gray-300 text-sm font-medium">
         <i className="fas fa-water text-brand-accent"></i>
-        <span>دلفین درایور</span>
+        <span>DolphinDriver</span>
       </div>
       <div className="flex items-center h-full">
          <button
@@ -235,7 +248,7 @@ const TitleBar: React.FC<{ isMaximized: boolean; onAboutClick: () => void; }> = 
           style={{ WebkitAppRegion: 'no-drag' }}
           className="w-10 h-full flex items-center justify-center text-gray-400 hover:bg-white/10 hover:text-white transition-colors"
           aria-label="درباره"
-          title="درباره دلفین درایور"
+          title="درباره DolphinDriver"
         >
           <i className="fas fa-info-circle text-sm"></i>
         </button>
@@ -318,6 +331,7 @@ const App: React.FC = () => {
   const [isSystemRestoreEnabled, setIsSystemRestoreEnabled] = useState<boolean | null>(null);
   const [showRestoreWarningBanner, setShowRestoreWarningBanner] = useState(true);
   const [currentOsInfo, setCurrentOsInfo] = useState<OsInfo | null>(null);
+  const [currentHardwareInfo, setCurrentHardwareInfo] = useState<HardwareInfo | null>(null);
 
   // Selective Backup
   const [drivers, setDrivers] = useState<DriverInfo[]>([]);
@@ -505,6 +519,7 @@ const App: React.FC = () => {
     const cleanupWindowState = window.electronAPI.onWindowStateChange(setIsMaximized);
     window.electronAPI.getWindowsPath().then(setWindowsPath);
     window.electronAPI.getOsInfo().then(setCurrentOsInfo);
+    window.electronAPI.getHardwareInfo().then(setCurrentHardwareInfo);
 
     const validateAndSetPath = async (key: string, setter: React.Dispatch<React.SetStateAction<string>>, scanCallback?: (path: string) => void) => {
         const path = await window.electronAPI.getSetting(key) || '';
@@ -597,7 +612,7 @@ const App: React.FC = () => {
 
   const handleCreateRestorePoint = async () => {
     if (isBusy) return;
-    const command = `powershell -Command "Checkpoint-Computer -Description 'DriverDolphin Pre-Restore Point' -RestorePointType 'MODIFY_SETTINGS'"`;
+    const command = `powershell -Command "Checkpoint-Computer -Description 'DolphinDriver Pre-Restore Point' -RestorePointType 'MODIFY_SETTINGS'"`;
     window.electronAPI.runCommand(command, "در حال ایجاد یک نقطه بازیابی سیستم جدید");
   };
 
@@ -633,6 +648,7 @@ const App: React.FC = () => {
       const driversToInstallPaths = new Set<string>();
       let installAllConfirmed = false;
       let crossVersionInstallAllConfirmed = false;
+      let crossPcInstallAllConfirmed = false;
 
       const getOsMajorVersion = (osName: string = ''): string => {
         if (osName.includes('Windows 11')) return 'Windows 11';
@@ -641,6 +657,32 @@ const App: React.FC = () => {
       };
 
       for (const backupDriver of driversToRestore) {
+          // Cross-PC hardware check
+          if (currentHardwareInfo && backupDriver.systemUUID && backupDriver.systemUUID !== 'N/A' && currentHardwareInfo.SystemUUID !== backupDriver.systemUUID && !crossPcInstallAllConfirmed) {
+              setCurrentOperation(`در انتظار تایید کاربر برای ${backupDriver.displayName}`);
+              const response = await requestConfirmation({
+                  type: 'warning',
+                  title: 'عدم تطابق سخت‌افزار',
+                  message: 'این درایور از یک کامپیوتر متفاوت پشتیبان‌گیری شده است. نصب آن به شدت توصیه نمی‌شود و ممکن است باعث ناپایداری شدید سیستم یا مشکلات دیگر شود.',
+                  detail: `سخت‌افزار فعلی: ${currentHardwareInfo.SystemModel}\n` +
+                          `سخت‌افزار پشتیبان: ${backupDriver.systemModel}\n\n` +
+                          `آیا می‌خواهید با مسئولیت کامل خودتان ادامه دهید؟`,
+                  buttons: ['نصب این مورد', 'رد شدن', 'نصب همه موارد باقی‌مانده', 'لغو عملیات'],
+              });
+              if (response === 0) { // Install this
+                  // continue to next check
+              } else if (response === 1) { // Skip
+                  addLog('INFO', `User skipped cross-PC restore for driver: ${backupDriver.displayName}`);
+                  continue; // Skip to next driver in loop
+              } else if (response === 2) { // Install All
+                  crossPcInstallAllConfirmed = true;
+              } else if (response === 3) { // Cancel
+                  addLog('INFO', 'Restore operation cancelled by user due to hardware mismatch.');
+                  addNotification('info', 'لغو شد', 'عملیات بازیابی توسط کاربر لغو شد.');
+                  setIsBusy(false); setCurrentOperation(''); return;
+              }
+          }
+          
           // Cross-OS version check
           if (currentOsInfo && backupDriver.backupOS && !crossVersionInstallAllConfirmed) {
               const currentMajor = getOsMajorVersion(currentOsInfo.OsProductName);
@@ -1112,12 +1154,12 @@ const App: React.FC = () => {
         <div className="bg-brand-med/50 ring-1 ring-red-500/30 rounded-lg p-10 max-w-lg">
             <i className="fas fa-user-shield text-5xl text-red-400 mb-6"></i>
             <h1 className="text-3xl font-bold text-red-300 mb-4">نیاز به دسترسی مدیر</h1>
-            <p className="text-gray-300 mb-8">برنامه دلفین درایور برای مدیریت درایورهای سیستمی نیاز به اجرا با دسترسی مدیر (Administrator) دارد. لطفاً برنامه را با دسترسی مناسب مجدداً اجرا کنید.</p>
+            <p className="text-gray-300 mb-8">برنامه DolphinDriver برای مدیریت درایورهای سیستمی نیاز به اجرا با دسترسی مدیر (Administrator) دارد. لطفاً برنامه را با دسترسی مناسب مجدداً اجرا کنید.</p>
             <div className="text-right bg-brand-dark/70 p-6 rounded-md ring-1 ring-brand-border">
                 <h2 className="font-bold text-lg text-gray-100 mb-4">چگونه به عنوان مدیر اجرا کنیم:</h2>
                 <ol className="list-decimal list-inside space-y-3 text-gray-300">
                     <li>این پنجره را ببندید.</li>
-                    <li>فایل اجرایی یا میان‌بر برنامه <strong className="text-brand-accent">دلفین درایور</strong> را پیدا کنید.</li>
+                    <li>فایل اجرایی یا میان‌بر برنامه <strong className="text-brand-accent">DolphinDriver</strong> را پیدا کنید.</li>
                     <li>روی آیکن برنامه <strong className="text-brand-accent">راست‌کلیک</strong> کنید.</li>
                     <li>از منوی باز شده گزینه <strong className="text-brand-accent">"Run as administrator"</strong> را انتخاب کنید.</li>
                 </ol>
